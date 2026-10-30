@@ -53,8 +53,8 @@ enum CatchLogger {
         stopSensors()
     }
 
-    /// Logs a fish in one call. Attaches to the active trip, or starts one if there is none,
-    /// so a catch is never lost because nobody pressed Start.
+    /// Logs a fish in one call. Attaches to `trip` when given (adding to a past trip), otherwise to the
+    /// active trip, starting one if needed so a catch is never lost because nobody pressed Start.
     @discardableResult
     static func logCatch(
         speciesID: String,
@@ -64,13 +64,16 @@ enum CatchLogger {
         weightKg: Double? = nil,
         photo: UIImage? = nil,
         identifiedBy: IdentificationSource? = nil,
+        to targetTrip: Trip? = nil,
         in context: ModelContext,
         at date: Date = .now
     ) -> FishCatch {
-        let trip = activeTrip(in: context) ?? startTrip(in: context, at: date)
+        let trip = targetTrip ?? activeTrip(in: context) ?? startTrip(in: context, at: date)
+        // A catch added to a finished trip goes at its end, not at today's date.
+        let timestamp = trip.endDate.map { min(date, $0) } ?? date
         let fishCatch = FishCatch(
             speciesID: speciesID,
-            timestamp: date,
+            timestamp: timestamp,
             count: count,
             sizeClass: sizeClass,
             lengthCm: lengthCm,
@@ -79,12 +82,12 @@ enum CatchLogger {
         fishCatch.identifiedBy = identifiedBy
 
         let settings = AppSettings.shared
-        let location = LocationService.shared.recentLocation()
+        let location = trip.isActive ? LocationService.shared.recentLocation() : nil
         if settings.tagCatchLocation, let location {
             fishCatch.latitude = location.coordinate.latitude
             fishCatch.longitude = location.coordinate.longitude
         }
-        if settings.useBarometer {
+        if settings.useBarometer, trip.isActive {
             fishCatch.pressureHPa = BarometerService.shared.seaLevelPressureHPa(
                 altitudeM: location?.altitude,
                 airTempC: trip.airTempC

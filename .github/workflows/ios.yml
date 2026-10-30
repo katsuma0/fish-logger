@@ -15,7 +15,7 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Use the newest Xcode on the runner
         run: |
@@ -52,6 +52,6 @@ jobs:
             -destination "id=${{ steps.sim.outputs.udid }}" \
             CODE_SIGNING_ALLOWED=NO > test.log 2>&1
           STATUS=$?
-          grep -E "✘|failed|error:|recorded an issue|Executed|passed after|Test run with" test.log | tail -200
+          grep -E "Test case|Test run|✘|recorded an issue|error:|\*\* TEST" test.log | tail -250
           if [ $STATUS -ne 0 ]; then tail -80 test.log; fi
           exit $STATUS
