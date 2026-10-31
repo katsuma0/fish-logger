@@ -92,7 +92,7 @@ extension SpeciesCatalog {
             colorHex: 0xB25B3B,
             habitat: "Rocky reefs, boulder fields and ledges, mostly deeper than 50 m.",
             range: "Northern Baja California to the Aleutian Islands, most common from Oregon to southeast Alaska.",
-            regions: [.california, .pacificNorthwest, .britishColumbia, .alaska]
+            regions: [.britishColumbia, .alaska, .pacificNorthwest]
         ),
         Species(
             id: "vermilion_rockfish",

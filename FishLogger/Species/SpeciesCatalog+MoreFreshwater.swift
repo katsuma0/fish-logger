@@ -26,7 +26,7 @@ extension SpeciesCatalog {
             colorHex: 0xC94754,
             habitat: "Cool, deep lakes and reservoirs; spawns in tributary streams or along gravel shores.",
             range: "Native to lakes in BC, the Yukon, Alaska, and the Pacific Northwest; stocked in lakes across the West.",
-            regions: [.britishColumbia, .alaska, .pacificNorthwest, .california, .mountainWest, .southwest]
+            regions: [.britishColumbia, .northernCanada, .alaska, .pacificNorthwest, .california, .mountainWest, .southwest]
         ),
         Species(
             id: "steelhead",
