@@ -85,18 +85,13 @@ struct StatsTests {
         #expect(stats.tripCount == 3)
         #expect(stats.daysFished == 3)
         #expect(stats.speciesCount == 2)
-        #expect(stats.releasedFish == 2)
+        // "Jig" and " jig" are one lure, plus the crankbait.
+        #expect(stats.lureCount == 2)
     }
 
-    @Test func ratesUseHoursOnTheWater() throws {
+    @Test func hoursCountTimeOnTheWater() throws {
         let stats = try calculate(makeLog())
         #expect(abs(stats.hoursFished - 6) < 0.0001)
-        let perHour = try #require(stats.fishPerHour)
-        #expect(abs(perHour - 1) < 0.0001)
-        let skunkRate = try #require(stats.skunkRate)
-        #expect(abs(skunkRate - 1.0 / 3.0) < 0.0001)
-        let releasedShare = try #require(stats.releasedShare)
-        #expect(abs(releasedShare - 2.0 / 6.0) < 0.0001)
     }
 
     @Test func runawayTripIsCappedAtSixteenHours() throws {
@@ -150,8 +145,6 @@ struct StatsTests {
         #expect(stats.totalFish == 2)
         #expect(stats.tripCount == 3)
         #expect(abs(stats.hoursFished - 6) < 0.0001)
-        let skunkRate = try #require(stats.skunkRate)
-        #expect(abs(skunkRate - 1.0 / 3.0) < 0.0001)
     }
 
     // MARK: Breakdowns

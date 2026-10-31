@@ -62,7 +62,6 @@ struct StatsCatchRecord: Sendable {
     let weightKg: Double?
     /// The class picked when logging, or one worked out from the measured length.
     let sizeClass: SizeClass?
-    let released: Bool
     let lure: String
 
     init(
@@ -74,7 +73,6 @@ struct StatsCatchRecord: Sendable {
         lengthCm: Double? = nil,
         weightKg: Double? = nil,
         sizeClass: SizeClass? = nil,
-        released: Bool = true,
         lure: String = ""
     ) {
         self.id = id
@@ -85,7 +83,6 @@ struct StatsCatchRecord: Sendable {
         self.lengthCm = lengthCm
         self.weightKg = weightKg
         self.sizeClass = sizeClass
-        self.released = released
         self.lure = lure
     }
 
@@ -101,7 +98,6 @@ struct StatsCatchRecord: Sendable {
             lengthCm: fishCatch.lengthCm,
             weightKg: fishCatch.weightKg,
             sizeClass: fishCatch.effectiveSizeClass,
-            released: fishCatch.released,
             lure: fishCatch.lure
         )
     }

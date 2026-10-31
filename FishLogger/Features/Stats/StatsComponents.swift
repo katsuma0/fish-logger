@@ -47,10 +47,6 @@ enum StatsFormat {
         value.formatted(.number.precision(.fractionLength(1)))
     }
 
-    static func percent(_ share: Double) -> String {
-        share.formatted(.percent.precision(.fractionLength(0)))
-    }
-
     /// Compact axis label: "6a", "12p".
     static func hourLabel(_ hour: Int) -> String {
         let twelveHour = hour % 12 == 0 ? 12 : hour % 12
@@ -99,7 +95,7 @@ struct StatsSummaryGrid: View {
     }
 
     var body: some View {
-        let columnCount = dynamicTypeSize.isAccessibilitySize ? 1 : 2
+        let columnCount = dynamicTypeSize.isAccessibilitySize ? 1 : 3
         let columns = Array(repeating: GridItem(.flexible(), spacing: 12, alignment: .top), count: columnCount)
         LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
             ForEach(tiles) { tile in
@@ -111,24 +107,8 @@ struct StatsSummaryGrid: View {
     private var tiles: [StatsTileContent] {
         [
             StatsTileContent(label: "Fish", value: "\(stats.totalFish)", spokenValue: nil),
-            StatsTileContent(label: "Trips", value: "\(stats.tripCount)", spokenValue: nil),
-            StatsTileContent(label: "Days out", value: "\(stats.daysFished)", spokenValue: nil),
             StatsTileContent(label: "Species", value: "\(stats.speciesCount)", spokenValue: nil),
-            StatsTileContent(
-                label: "Fish per hour",
-                value: stats.fishPerHour.map { StatsFormat.rate($0) } ?? "-",
-                spokenValue: stats.fishPerHour == nil ? "not enough time logged" : nil
-            ),
-            StatsTileContent(
-                label: "Skunked",
-                value: stats.skunkRate.map { StatsFormat.percent($0) } ?? "-",
-                spokenValue: stats.skunkRate == nil ? "no trips" : nil
-            ),
-            StatsTileContent(
-                label: "Released",
-                value: stats.releasedShare.map { StatsFormat.percent($0) } ?? "-",
-                spokenValue: stats.releasedShare == nil ? "no fish" : nil
-            )
+            StatsTileContent(label: "Lures", value: "\(stats.lureCount)", spokenValue: nil)
         ]
     }
 }
