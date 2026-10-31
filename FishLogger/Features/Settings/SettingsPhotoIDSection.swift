@@ -8,7 +8,7 @@ struct SettingsPhotoIDRow: View {
     @State private var hasSavedKey = false
 
     var body: some View {
-        SettingsLinkRow("Photo ID", systemImage: "camera.viewfinder", color: .systemGray, value: status) {
+        SettingsLinkRow("Photo ID", systemImage: "camera.fill", color: .systemGray, value: status) {
             SettingsPhotoIDView()
         }
         .onAppear {
