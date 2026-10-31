@@ -24,19 +24,19 @@ The answers decide which fish show up in lists and which tiles the quick log sta
 
 Today tab, Start fishing. The spot name fills in from GPS: a nearby spot you've fished before if there is one, otherwise the lake or town name. Water body and method default to last time. One more tap starts the trip.
 
-Each fish is one tap on its tile. The species you've caught this trip come first, then favourites, then whatever you catch most. A banner shows up for 8 seconds with size buttons (Dink, Small, Medium, Large, Trophy) and Undo. Size is optional. Long-press a tile to log 2, 3, or 5 at once.
+Each fish is one tap on its tile. Favourites come first, then what you catch most, then the usual fish for your region. The order is fixed for the whole trip so a tile never moves under your thumb; a new species goes on the end. A bar shows up for 6 seconds with Size, Photo, and Undo, and stays put while VoiceOver is on. Size is optional. Long-press a tile to log 2, 3, or 5 at once.
 
 Size buttons show the length range for that species, so "Large" means the same thing every trip. A large walleye is 55 to 70 cm. You can also enter exact length and weight in the catch editor. When you enter a length but no weight, the app estimates weight from the species' standard length-weight curve and labels it as an estimate.
 
-If you never press Start, the first fish starts a trip anyway.
+If you never press Start, the first fish starts a trip anyway, with last trip's water and method. If a trip is still running the next morning, Today asks whether you're still fishing before logging into it.
 
 ## Photo ID
 
 There are three ways to identify a fish, and they fall back in order:
 
-1. Claude. Add an Anthropic API key in Settings (get one at console.anthropic.com). The photo is sent only when you take one in the Identify screen. It uses `claude-opus-5-5` by default; the model is editable in Settings. Each ID costs a few cents of API credit.
+1. Claude. Add an Anthropic API key in Settings, Photo ID (get one at console.anthropic.com). The photo is sent only when you tap Identify with Claude, never just for picking it. The request names your regions so the answer leans toward fish you can actually catch there. It uses `claude-opus-5-5` by default; the model is editable in Settings. Each ID costs a few cents of API credit.
 2. Your own Core ML model, if you add one. Train an image classifier in Create ML with one folder of photos per species, named with the species id (`walleye`, `northern_pike`, `smallmouth_bass`, and so on; ids are in `FishLogger/Species/SpeciesCatalog+Data.swift`). Name the output `FishClassifier.mlmodel` and drop it into the `FishLogger` folder. Xcode picks it up on the next build.
-3. The checklist. Tap the features you can see, like a white tip on the tail or whiskers, and the list narrows. Works with no signal.
+3. The checklist. Tap the features you can see, like a white tip on the tail or whiskers, and the list narrows to fish from your regions. The best matches stay pinned at the bottom. Works with no signal.
 
 You always confirm the species before anything is logged.
 
@@ -52,7 +52,7 @@ Settings has light, dark, or match iPhone; text size separate from the system se
 
 Trips, catches, and photos live on the phone in SwiftData. Nothing syncs anywhere. Settings, Export CSV gives one row per catch with the trip's conditions alongside, for a spreadsheet or R.
 
-Weather comes from Open-Meteo, which is free for non-commercial use and needs no key. Trips logged offline can be filled in later from the trip screen, up to 92 days back. If this ever ships as a paid app, Open-Meteo needs a commercial plan.
+Weather comes from Open-Meteo, which is free for non-commercial use and needs no key. Trips logged offline can be filled in later from the trip's page in the Trips tab, up to 92 days back. If this ever ships as a paid app, Open-Meteo needs a commercial plan.
 
 Species data covers 102 freshwater and sea-run game fish across Canada and the US, each tagged with the regions where people actually catch it. Saltwater inshore fish like redfish and snook aren't in yet. It isn't a regulations guide. In Ontario, check the Ontario Fishing Regulations Summary before keeping anything; elsewhere, your province or state's version.
 
