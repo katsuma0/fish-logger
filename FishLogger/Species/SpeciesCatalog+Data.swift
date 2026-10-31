@@ -943,7 +943,7 @@ extension SpeciesCatalog {
                 "Short anal fin; a snakehead's is long, nearly matching its dorsal.",
                 "Black eyespot at the base of the tail, ringed in orange on males."
             ],
-            lookalikes: ["northern_snakehead", "burbot"],
+            lookalikes: ["ruddy_bowfin", "northern_snakehead", "burbot"],
             traits: [.torpedoBody, .largeMouth, .longDorsalFin, .darkMottling, .roundedTail],
             sizeCutoffsCm: [40, 50, 60, 70],
             weightA: nil,

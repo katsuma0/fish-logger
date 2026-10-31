@@ -445,7 +445,7 @@ extension SpeciesCatalog {
                 "Flat, scaly, snake-like head with no bony plate under the chin.",
                 "Orange-ringed black eyespot near the tail base; a northern snakehead has none."
             ],
-            lookalikes: ["bowfin", "northern_snakehead"],
+            lookalikes: ["ruddy_bowfin", "northern_snakehead"],
             traits: [.torpedoBody, .largeMouth, .longDorsalFin, .darkMottling, .roundedTail],
             sizeCutoffsCm: [40, 50, 62, 75],
             weightA: nil,

@@ -54,7 +54,7 @@ Trips, catches, and photos live on the phone in SwiftData. Nothing syncs anywher
 
 Weather comes from Open-Meteo, which is free for non-commercial use and needs no key. Trips logged offline can be filled in later from the trip's page in the Trips tab, up to 92 days back. If this ever ships as a paid app, Open-Meteo needs a commercial plan.
 
-Species data covers 177 game fish across Canada and the US, each tagged with the regions where people actually catch it: freshwater and sea-run fish, inshore fish like redfish, snook and fluke, offshore fish like mahi and tuna, and bottom fish from cod to rockfish. Where a fact couldn't be confirmed it was left out, so a few regions are probably missing fish they have. It isn't a regulations guide. In Ontario, check the Ontario Fishing Regulations Summary before keeping anything; elsewhere, your province or state's version.
+Species data covers 244 game fish across Canada and the US, each tagged with the regions where people actually catch it: freshwater and sea-run fish, inshore fish like redfish, snook and fluke, offshore fish like mahi and tuna, bottom fish from cod to rockfish, and the sharks people fish for from piers and charters. Where a fact couldn't be confirmed it was left out, so a few regions are probably missing fish they have. It isn't a regulations guide. In Ontario, check the Ontario Fishing Regulations Summary before keeping anything; elsewhere, your province or state's version.
 
 ## Code
 
