@@ -16,7 +16,7 @@ To try the stats without fishing first, go to Settings and tap Add sample trips.
 
 ## First launch
 
-The app asks two things: where you fish and what you fish for. Where is a list of 19 regions, from British Columbia and Ontario down to Texas and Florida, or Use my location to pick one from GPS. What is a grid of kinds of fish: walleye and perch, bass, panfish, trout, and so on. Both can be skipped, and skipping means all of North America and a bit of everything.
+The app asks two things: where you fish and what you fish for. Where is a list of 19 regions, from British Columbia and Ontario down to Texas and Florida, or Use my location to pick one from GPS. What is a grid of kinds of fish: walleye and perch, bass, panfish, trout, inshore, offshore, and so on. Kinds your regions don't have are left off, so nobody in Saskatchewan gets asked about tuna. Both can be skipped, and skipping means all of North America and a bit of everything.
 
 The answers decide which fish show up in lists and which tiles the quick log starts with. A Florida angler doesn't scroll past lake trout, and an Ontario one doesn't see peacock bass. Search still finds every species, with the ones from other regions listed after, so an odd catch can always be logged. Change both later in Settings, Your fishing.
 
@@ -54,7 +54,7 @@ Trips, catches, and photos live on the phone in SwiftData. Nothing syncs anywher
 
 Weather comes from Open-Meteo, which is free for non-commercial use and needs no key. Trips logged offline can be filled in later from the trip's page in the Trips tab, up to 92 days back. If this ever ships as a paid app, Open-Meteo needs a commercial plan.
 
-Species data covers 102 freshwater and sea-run game fish across Canada and the US, each tagged with the regions where people actually catch it. Saltwater inshore fish like redfish and snook aren't in yet. It isn't a regulations guide. In Ontario, check the Ontario Fishing Regulations Summary before keeping anything; elsewhere, your province or state's version.
+Species data covers 177 game fish across Canada and the US, each tagged with the regions where people actually catch it: freshwater and sea-run fish, inshore fish like redfish, snook and fluke, offshore fish like mahi and tuna, and bottom fish from cod to rockfish. Where a fact couldn't be confirmed it was left out, so a few regions are probably missing fish they have. It isn't a regulations guide. In Ontario, check the Ontario Fishing Regulations Summary before keeping anything; elsewhere, your province or state's version.
 
 ## Code
 

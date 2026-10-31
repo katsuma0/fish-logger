@@ -460,7 +460,7 @@ extension SpeciesCatalog {
         Species(
             id: "rainbow_trout",
             commonName: "Rainbow trout",
-            otherNames: ["Steelhead", "Rainbow", "Kamloops trout", "Truite arc-en-ciel"],
+            otherNames: ["Rainbow", "Kamloops trout", "Truite arc-en-ciel"],
             scientificName: "Oncorhynchus mykiss",
             group: .troutChar,
             summary: "Native to the Pacific slope and stocked across the continent. Lake-run and sea-run fish, called steelhead, run rivers in spring and fall.",
@@ -469,7 +469,7 @@ extension SpeciesCatalog {
                 "Small black spots all over the back, dorsal fin, and tail.",
                 "No red or orange slash under the jaw; a cutthroat has one."
             ],
-            lookalikes: ["cutthroat_trout", "brown_trout", "coho_salmon"],
+            lookalikes: ["steelhead", "cutthroat_trout", "brown_trout", "coho_salmon"],
             traits: [.adiposeFin, .torpedoBody, .darkSpotsLightBody, .pinkOrRedStripe, .silverColor],
             sizeCutoffsCm: [25, 38, 55, 72],
             weightA: -4.898,
@@ -661,7 +661,7 @@ extension SpeciesCatalog {
         Species(
             id: "sockeye_salmon",
             commonName: "Sockeye salmon",
-            otherNames: ["Sockeye", "Kokanee", "Red salmon", "Saumon rouge"],
+            otherNames: ["Sockeye", "Red salmon", "Saumon rouge"],
             scientificName: "Oncorhynchus nerka",
             group: .salmon,
             summary: "Pacific salmon that feeds on plankton. Its landlocked form, the kokanee, is a popular lake fish in BC.",
@@ -670,15 +670,15 @@ extension SpeciesCatalog {
                 "Plain tail with no spots; coho and chinook tails are spotted.",
                 "Spawning fish turn bright red with a green head."
             ],
-            lookalikes: ["chum_salmon", "coho_salmon", "rainbow_trout"],
+            lookalikes: ["kokanee", "chum_salmon", "coho_salmon", "rainbow_trout"],
             traits: [.adiposeFin, .torpedoBody, .silverColor, .forkedTail],
             sizeCutoffsCm: [25, 35, 50, 62],
             weightA: nil,
             weightB: nil,
             colorHex: 0x9E3B4B,
             habitat: "Sea-run fish spawn in rivers tied to lakes; kokanee live in cool, deep lakes and school in open water.",
-            range: "Sea-run fish from the Columbia River to Alaska; kokanee are native in the Northwest and stocked in lakes across the West.",
-            regions: [.britishColumbia, .northernCanada, .alaska, .pacificNorthwest, .california, .mountainWest, .southwest]
+            range: "Pacific coast rivers and lakes from the Columbia River north through BC to Alaska.",
+            regions: [.britishColumbia, .northernCanada, .alaska, .pacificNorthwest]
         ),
         Species(
             id: "atlantic_salmon",
