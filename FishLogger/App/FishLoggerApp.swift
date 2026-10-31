@@ -5,6 +5,11 @@ import SwiftUI
 struct FishLoggerApp: App {
     @State private var settings = AppSettings.shared
 
+    init() {
+        // Lets Siri match species names in phrases like "Log a walleye in Fish Logger".
+        FishLoggerShortcuts.updateAppShortcutParameters()
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()
