@@ -23,12 +23,6 @@ struct SettingsLoggingView: View {
             } footer: {
                 Text("Saves the spot for each fish, not only for the trip. Needs location access.")
             }
-
-            Section {
-                Toggle("Keep screen on during trips", isOn: $settings.keepScreenOn)
-            } footer: {
-                Text("No Face ID or passcode for every fish. Uses more battery.")
-            }
         }
         .settingsListStyle()
         .navigationTitle("Logging")

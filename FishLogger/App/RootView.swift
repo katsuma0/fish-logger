@@ -44,7 +44,6 @@ struct RootView: View {
         }
         .onAppear(perform: launch)
         .onChange(of: activeTrips.count) { syncSessionState() }
-        .onChange(of: settings.keepScreenOn) { syncSessionState() }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .background:
@@ -81,10 +80,9 @@ struct RootView: View {
         Binding(get: { !settings.hasSeenWelcome }, set: { _ in })
     }
 
-    /// Sensors and the screen-awake flag follow whether a trip is running.
+    /// GPS and the barometer follow whether a trip is running.
     private func syncSessionState() {
         let tripRunning = !activeTrips.isEmpty
-        UIApplication.shared.isIdleTimerDisabled = tripRunning && settings.keepScreenOn && scenePhase == .active
         if tripRunning, scenePhase == .active {
             CatchLogger.startSensors()
         } else if !tripRunning {

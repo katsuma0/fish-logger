@@ -77,13 +77,6 @@ struct TodayStartTripSheet: View {
                     .pickerStyle(.menu)
                     .frame(minHeight: settings.buttonSize.minTapSize)
                 }
-
-                Section {
-                    Toggle("Keep screen on", isOn: keepScreenOnBinding)
-                        .frame(minHeight: settings.buttonSize.minTapSize)
-                } footer: {
-                    Text("Stops the screen from locking while a trip is running. Uses more battery.")
-                }
             }
             .navigationTitle("Start a trip")
             .navigationBarTitleDisplayMode(.inline)
@@ -127,15 +120,6 @@ struct TodayStartTripSheet: View {
                 locationName = newValue
                 nameTouched = true
             }
-        )
-    }
-
-    /// Same setting as in Settings, here because the start of a trip is when it matters.
-    private var keepScreenOnBinding: Binding<Bool> {
-        let settings = settings
-        return Binding<Bool>(
-            get: { settings.keepScreenOn },
-            set: { newValue in settings.keepScreenOn = newValue }
         )
     }
 
