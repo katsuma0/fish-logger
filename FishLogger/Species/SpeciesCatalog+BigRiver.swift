@@ -155,7 +155,7 @@ extension SpeciesCatalog {
             colorHex: 0x3F6496,
             habitat: "Reservoirs, big rivers, and tailwaters, roaming open water after schools of shad.",
             range: "Hatchery fish stocked in reservoirs across much of the US, most heavily in the South and the Plains.",
-            regions: [.mountainWest, .northernPlains, .southernPlains, .ohioValley, .northeast, .midAtlantic, .southeast, .florida]
+            regions: [.california, .mountainWest, .northernPlains, .southernPlains, .ohioValley, .northeast, .midAtlantic, .southeast, .florida]
         ),
         Species(
             id: "saugeye",
@@ -441,7 +441,7 @@ extension SpeciesCatalog {
             colorHex: 0x7A5751,
             habitat: "Shallow, weedy, slow water such as tidal creeks, marshes, ponds, and backwaters.",
             range: "Native to eastern Asia; established around Chesapeake Bay and in parts of Pennsylvania, New Jersey, and New York.",
-            regions: [.northeast, .midAtlantic]
+            regions: [.northeast, .midAtlantic, .southeast]
         ),
         Species(
             id: "redfin_pickerel",

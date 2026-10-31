@@ -205,7 +205,7 @@ extension SpeciesCatalog {
             colorHex: 0x72622C,
             habitat: "Warm, clear lakes, ponds and slow rivers, usually near the bottom around weeds and stumps.",
             range: "Native from the Carolinas and Florida west to Texas and north to southern Illinois; stocked widely, including Arizona and California.",
-            regions: [.california, .southwest, .northernPlains, .southernPlains, .ohioValley, .midAtlantic, .southeast, .florida]
+            regions: [.california, .southwest, .northernPlains, .southernPlains, .upperMidwest, .ohioValley, .midAtlantic, .southeast, .florida]
         ),
         Species(
             id: "green_sunfish",

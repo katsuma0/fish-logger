@@ -89,7 +89,7 @@ extension SpeciesCatalog {
             colorHex: 0x9C5A24,
             habitat: "Stocked lakes, reservoirs, and some streams, often hunting small fish along shorelines.",
             range: "Stocked in Utah, Washington, and other states in the West and Northeast; rare wild fish turn up where brown and brook trout spawn together.",
-            regions: [.pacificNorthwest, .mountainWest, .northeast]
+            regions: [.prairies, .pacificNorthwest, .mountainWest, .northeast]
         ),
         Species(
             id: "chum_salmon",
@@ -243,7 +243,7 @@ extension SpeciesCatalog {
             colorHex: 0x427878,
             habitat: "Coastal waters and bays; spawns in tidal and lower freshwater reaches of rivers.",
             range: "Atlantic coast from New England to northeastern Florida; most spawning runs are from the Chesapeake Bay south.",
-            regions: [.midAtlantic, .southeast, .florida]
+            regions: [.northeast, .midAtlantic, .southeast, .florida]
         ),
     ]
 }

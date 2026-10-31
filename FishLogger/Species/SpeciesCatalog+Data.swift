@@ -50,7 +50,7 @@ extension SpeciesCatalog {
             colorHex: 0x7A6644,
             habitat: "Turbid rivers and large shallow lakes, over sand and gravel, often in current.",
             range: "Native from the St. Lawrence west to Alberta and south through the Mississippi basin to the Gulf states.",
-            regions: [.prairies, .ontario, .quebec, .mountainWest, .northernPlains, .southernPlains, .upperMidwest, .ohioValley, .midAtlantic, .southeast]
+            regions: [.prairies, .ontario, .quebec, .mountainWest, .northernPlains, .southernPlains, .upperMidwest, .ohioValley, .northeast, .midAtlantic, .southeast]
         ),
         Species(
             id: "yellow_perch",
@@ -72,7 +72,7 @@ extension SpeciesCatalog {
             colorHex: 0x7D8B2B,
             habitat: "Weedy bays, flats, and open basins of lakes and slow rivers; schools roam over sand and mud.",
             range: "Native from the Maritimes to the Northwest Territories and south to the Ohio basin and the Carolinas; introduced in the West.",
-            regions: [.britishColumbia, .prairies, .ontario, .quebec, .atlanticCanada, .northernCanada, .pacificNorthwest, .mountainWest, .northernPlains, .upperMidwest, .ohioValley, .northeast, .midAtlantic, .southeast]
+            regions: [.britishColumbia, .prairies, .ontario, .quebec, .atlanticCanada, .northernCanada, .pacificNorthwest, .mountainWest, .southwest, .northernPlains, .upperMidwest, .ohioValley, .northeast, .midAtlantic, .southeast]
         ),
 
         // MARK: Pike and muskie
@@ -411,7 +411,7 @@ extension SpeciesCatalog {
             colorHex: 0x55675C,
             habitat: "Deep, cold, clear lakes; near the surface after ice-out, then down near the thermocline.",
             range: "Native from Labrador to Alaska and south to the Great Lakes and New England; introduced in deep western lakes.",
-            regions: [.britishColumbia, .prairies, .ontario, .quebec, .atlanticCanada, .northernCanada, .alaska, .pacificNorthwest, .california, .mountainWest, .upperMidwest, .ohioValley, .northeast]
+            regions: [.britishColumbia, .prairies, .ontario, .quebec, .atlanticCanada, .northernCanada, .alaska, .pacificNorthwest, .california, .mountainWest, .southwest, .upperMidwest, .ohioValley, .northeast]
         ),
         Species(
             id: "brook_trout",
@@ -477,7 +477,7 @@ extension SpeciesCatalog {
             colorHex: 0xA35A72,
             habitat: "Cool streams, rivers, and lakes; steelhead spend summers in the Great Lakes or the ocean.",
             range: "Native to Pacific drainages from Alaska to Mexico and to Alberta's Athabasca River; stocked across the continent.",
-            regions: [.britishColumbia, .prairies, .ontario, .quebec, .atlanticCanada, .alaska, .pacificNorthwest, .california, .mountainWest, .southwest, .northernPlains, .southernPlains, .upperMidwest, .ohioValley, .northeast, .midAtlantic, .southeast]
+            regions: [.britishColumbia, .prairies, .ontario, .quebec, .atlanticCanada, .northernCanada, .alaska, .pacificNorthwest, .california, .mountainWest, .southwest, .northernPlains, .southernPlains, .upperMidwest, .ohioValley, .northeast, .midAtlantic, .southeast]
         ),
         Species(
             id: "splake",
@@ -521,7 +521,7 @@ extension SpeciesCatalog {
             colorHex: 0xA8643A,
             habitat: "Cold, clear mountain streams and lakes; coastal fish also use estuaries.",
             range: "Native to the West from southeast Alaska and Alberta south to northern California, Nevada, and New Mexico.",
-            regions: [.britishColumbia, .prairies, .alaska, .pacificNorthwest, .california, .mountainWest, .southwest]
+            regions: [.britishColumbia, .prairies, .alaska, .pacificNorthwest, .california, .mountainWest, .southwest, .southeast]
         ),
         Species(
             id: "bull_trout",

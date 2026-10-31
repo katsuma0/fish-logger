@@ -26,7 +26,7 @@ extension SpeciesCatalog {
             colorHex: 0x477A30,
             habitat: "Warm offshore water near the surface, under weed lines, logs and buoys.",
             range: "Warm seas worldwide; north along the Gulf Stream to New England in summer, and across the Gulf.",
-            regions: [.southernPlains, .northeast, .midAtlantic, .southeast, .florida]
+            regions: [.california, .southernPlains, .northeast, .midAtlantic, .southeast, .florida]
         ),
         Species(
             id: "yellowfin_tuna",

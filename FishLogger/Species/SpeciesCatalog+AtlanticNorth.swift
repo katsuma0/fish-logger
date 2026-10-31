@@ -48,7 +48,7 @@ extension SpeciesCatalog {
             colorHex: 0x7C5394,
             habitat: "Bays, sounds and estuaries over sand or mud, often along channel edges.",
             range: "Atlantic coast from Nova Scotia to southeastern Florida; most common from New York to North Carolina.",
-            regions: [.northeast, .midAtlantic, .southeast]
+            regions: [.northeast, .midAtlantic, .southeast, .florida]
         ),
         Species(
             id: "summer_flounder",
