@@ -106,7 +106,7 @@ extension SpeciesCatalog {
                 "No white edges on the tail; a redeye bass has them.",
                 "Jaw reaches the back of the eye but not past it."
             ],
-            lookalikes: ["smallmouth_bass", "redeye_bass", "alabama_bass"],
+            lookalikes: ["smallmouth_bass", "chattahoochee_bass", "redeye_bass", "alabama_bass"],
             traits: [.spinyDorsal, .verticalBars, .darkMottling, .forkedTail],
             sizeCutoffsCm: [25, 33, 40, 48],
             weightA: nil,
