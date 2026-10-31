@@ -1,0 +1,68 @@
+name: iOS build
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Use the newest Xcode on the runner
+        run: |
+          ls -d /Applications/Xcode*.app
+          XCODE=$(ls -d /Applications/Xcode_*.app | grep -v -i beta | sort -V | tail -1)
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
+
+      - name: Pick an iPhone simulator
+        id: sim
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 .github/scripts/pick_simulator.py)
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        run: |
+          set +e
+          xcodebuild build-for-testing \
+            -project FishLogger.xcodeproj \
+            -scheme FishLogger \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            CODE_SIGNING_ALLOWED=NO > build.log 2>&1
+          STATUS=$?
+          grep -E "(error|warning):" build.log | sort -u | head -300
+          if [ $STATUS -ne 0 ]; then tail -60 build.log; fi
+          exit $STATUS
+
+      - name: Test
+        run: |
+          set +e
+          xcodebuild test-without-building \
+            -project FishLogger.xcodeproj \
+            -scheme FishLogger \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -resultBundlePath TestResults.xcresult \
+            CODE_SIGNING_ALLOWED=NO > test.log 2>&1
+          STATUS=$?
+          grep -E "Test case|Test run|✘|recorded an issue|error:|\*\* TEST" test.log | tail -250
+          if [ $STATUS -ne 0 ]; then
+            tail -80 test.log
+            # A crash in the test host fails every test in flight with no reason, so print the why.
+            echo "::group::Failure messages"
+            xcrun xcresulttool get test-results tests --path TestResults.xcresult | python3 .github/scripts/print_failures.py
+            echo "::endgroup::"
+            echo "::group::Crash reports"
+            grep -nE "Fatal error|Crash:|crashed|Restarting after|EXC_|SIGABRT|SIGTRAP|terminating due to" test.log | head -60
+            ls -t ~/Library/Logs/DiagnosticReports/FishLogger*.ips 2>/dev/null | head -3 | xargs python3 .github/scripts/print_crash.py
+            echo "::endgroup::"
+          fi
+          exit $STATUS
