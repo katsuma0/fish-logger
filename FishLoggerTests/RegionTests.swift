@@ -62,6 +62,24 @@ struct RegionTests {
         }
     }
 
+    @Test func saltwaterFishOnlyLiveOnTheCoasts() {
+        let coastal: Set<FishingRegion> = [
+            .britishColumbia, .quebec, .atlanticCanada, .northernCanada, .alaska, .pacificNorthwest,
+            .california, .southernPlains, .northeast, .midAtlantic, .southeast, .florida
+        ]
+        let saltwater: Set<SpeciesGroup> = [.inshore, .offshore, .bottomfish]
+        for species in SpeciesCatalog.all where saltwater.contains(species.group) {
+            #expect(!species.regions.isEmpty, "\(species.id) needs at least one coast")
+            #expect(species.regions.isSubset(of: coastal), "\(species.id) lists an inland region")
+        }
+    }
+
+    @Test func inlandAnglersAreNotAskedAboutOffshoreFishing() {
+        let present = Set(SpeciesCatalog.available(in: [.prairies]).map(\.group))
+        #expect(!present.contains(.offshore))
+        #expect(present.contains(.perch))
+    }
+
     @Test func popularListOnlyNamesRealSpeciesOrPlannedOnes() {
         // Popular ids may name species from batches still being written; unknown ones are skipped.
         let resolved = SpeciesCatalog.popularIDs.compactMap(SpeciesCatalog.species(id:))

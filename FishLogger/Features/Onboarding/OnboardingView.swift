@@ -77,7 +77,7 @@ struct OnboardingView: View {
                         title: "What do you fish for?",
                         detail: "These go first on your quick log. Pick none for a bit of everything."
                     )
-                    TargetFishGrid(selection: $groups)
+                    TargetFishGrid(selection: $groups, regions: regions)
                 }
                 .padding(16)
             }

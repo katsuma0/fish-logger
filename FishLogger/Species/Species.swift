@@ -2,7 +2,9 @@ import Foundation
 import SwiftUI
 
 enum SpeciesGroup: String, CaseIterable, Identifiable {
-    case pike, perch, blackBass, sunfish, temperateBass, troutChar, salmon, whitefish, catfish, ancient, carpSuckers, other
+    case pike, perch, blackBass, sunfish, temperateBass, troutChar, salmon, whitefish, catfish, ancient, carpSuckers
+    case inshore, offshore, bottomfish
+    case other
 
     var id: String { rawValue }
 
@@ -19,6 +21,9 @@ enum SpeciesGroup: String, CaseIterable, Identifiable {
         case .catfish: "Catfish and bullheads"
         case .ancient: "Sturgeon, gar and bowfin"
         case .carpSuckers: "Carp, suckers and buffalo"
+        case .inshore: "Inshore saltwater"
+        case .offshore: "Offshore"
+        case .bottomfish: "Reef and bottom fish"
         case .other: "Everything else"
         }
     }
@@ -37,6 +42,9 @@ enum SpeciesGroup: String, CaseIterable, Identifiable {
         case .catfish: "Catfish"
         case .ancient: "Sturgeon and gar"
         case .carpSuckers: "Carp"
+        case .inshore: "Inshore"
+        case .offshore: "Offshore"
+        case .bottomfish: "Bottom fish"
         case .other: "Whatever bites"
         }
     }
@@ -58,6 +66,9 @@ enum SpeciesGroup: String, CaseIterable, Identifiable {
         case .catfish: "channel_catfish"
         case .ancient: "lake_sturgeon"
         case .carpSuckers: "common_carp"
+        case .inshore: "red_drum"
+        case .offshore: "mahi_mahi"
+        case .bottomfish: "red_snapper"
         case .other: "freshwater_drum"
         }
     }
@@ -66,14 +77,14 @@ enum SpeciesGroup: String, CaseIterable, Identifiable {
 /// Visible features used by the offline "what am I looking at" checklist.
 enum FishTrait: String, CaseIterable, Identifiable {
     // Shape
-    case torpedoBody, deepFlatBody, duckbillSnout, longToothySnout, largeMouth, smallMouth
+    case torpedoBody, deepFlatBody, duckbillSnout, longToothySnout, largeMouth, smallMouth, billSnout
     // Fins and tail
-    case adiposeFin, spinyDorsal, twoSeparateDorsals, longDorsalFin, forkedTail, squareTail, roundedTail
+    case adiposeFin, spinyDorsal, twoSeparateDorsals, longDorsalFin, forkedTail, squareTail, roundedTail, finlets
     // Head and skin
-    case barbels, bonyPlates, smoothSkin, earFlap, glassyEye
+    case barbels, bonyPlates, smoothSkin, earFlap, glassyEye, eyesOnOneSide
     // Markings and colour
     case verticalBars, darkSpotsLightBody, lightSpotsDarkBody, pinkOrRedStripe, whiteFinEdges,
-         whiteTailTip, goldenColor, silverColor, darkMottling
+         whiteTailTip, goldenColor, silverColor, darkMottling, tailSpot, darkLateralLine
 
     var id: String { rawValue }
 
@@ -92,11 +103,11 @@ enum FishTrait: String, CaseIterable, Identifiable {
 
     var category: Category {
         switch self {
-        case .torpedoBody, .deepFlatBody, .duckbillSnout, .longToothySnout, .largeMouth, .smallMouth: .shape
-        case .adiposeFin, .spinyDorsal, .twoSeparateDorsals, .longDorsalFin, .forkedTail, .squareTail, .roundedTail: .fins
-        case .barbels, .bonyPlates, .smoothSkin, .earFlap, .glassyEye: .head
+        case .torpedoBody, .deepFlatBody, .duckbillSnout, .longToothySnout, .largeMouth, .smallMouth, .billSnout: .shape
+        case .adiposeFin, .spinyDorsal, .twoSeparateDorsals, .longDorsalFin, .forkedTail, .squareTail, .roundedTail, .finlets: .fins
+        case .barbels, .bonyPlates, .smoothSkin, .earFlap, .glassyEye, .eyesOnOneSide: .head
         case .verticalBars, .darkSpotsLightBody, .lightSpotsDarkBody, .pinkOrRedStripe, .whiteFinEdges,
-             .whiteTailTip, .goldenColor, .silverColor, .darkMottling: .markings
+             .whiteTailTip, .goldenColor, .silverColor, .darkMottling, .tailSpot, .darkLateralLine: .markings
         }
     }
 
@@ -129,6 +140,11 @@ enum FishTrait: String, CaseIterable, Identifiable {
         case .goldenColor: "Gold or bronze"
         case .silverColor: "Bright silver"
         case .darkMottling: "Blotchy pattern"
+        case .billSnout: "Long bill or sword"
+        case .finlets: "Little fins before the tail"
+        case .eyesOnOneSide: "Both eyes on one side"
+        case .tailSpot: "Black spot near the tail"
+        case .darkLateralLine: "Dark line along the side"
         }
     }
 
@@ -161,6 +177,11 @@ enum FishTrait: String, CaseIterable, Identifiable {
         case .goldenColor: "Gold, brassy, or bronze colouring."
         case .silverColor: "Mostly bright, plain silver."
         case .darkMottling: "Irregular dark blotches or marbling."
+        case .billSnout: "Upper jaw stretches into a spear or a flat sword."
+        case .finlets: "Row of small separate fins between the last fins and the tail."
+        case .eyesOnOneSide: "Flat fish that lies on one side, with both eyes on the top."
+        case .tailSpot: "One or more round black spots near the base of the tail."
+        case .darkLateralLine: "A dark, sharp line runs from the gill cover to the tail."
         }
     }
 }

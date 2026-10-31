@@ -94,16 +94,25 @@ struct RegionPickerSections: View {
 /// Grid of the kinds of fish people go after. Multi-select; none picked means everything.
 struct TargetFishGrid: View {
     @Binding var selection: Set<SpeciesGroup>
+    /// Kinds of fish nobody can catch in these regions are left off, so a Prairies angler is not
+    /// asked about offshore fishing. Empty means all of North America.
+    var regions: Set<FishingRegion> = []
 
     @Environment(AppSettings.self) private var settings
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         LazyVGrid(columns: columns, spacing: 10) {
-            ForEach(SpeciesGroup.targetChoices) { group in
+            ForEach(choices) { group in
                 tile(group)
             }
         }
+    }
+
+    /// A group already picked stays, so it can still be turned off after the regions change.
+    private var choices: [SpeciesGroup] {
+        let present = Set(SpeciesCatalog.available(in: regions).map(\.group))
+        return SpeciesGroup.targetChoices.filter { present.contains($0) || selection.contains($0) }
     }
 
     /// One column at accessibility text sizes, so labels wrap instead of shrinking.
@@ -163,7 +172,7 @@ struct FishingProfileView: View {
                 }
                 NavigationLink {
                     ScrollView {
-                        TargetFishGrid(selection: $settings.targetGroups)
+                        TargetFishGrid(selection: $settings.targetGroups, regions: settings.homeRegions)
                             .padding(16)
                     }
                     .background(Theme.screenBackground)

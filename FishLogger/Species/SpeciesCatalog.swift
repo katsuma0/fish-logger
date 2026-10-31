@@ -93,7 +93,11 @@ enum SpeciesCatalog {
     /// quick log tiles, so a new install shows fish people actually catch, not alphabetical oddities.
     static let popularIDs: [String] = [
         "largemouth_bass", "walleye", "smallmouth_bass", "bluegill", "black_crappie", "channel_catfish",
-        "rainbow_trout", "yellow_perch", "northern_pike", "brook_trout", "brown_trout", "striped_bass",
+        "red_drum", "spotted_seatrout", "rainbow_trout", "yellow_perch", "northern_pike", "brook_trout",
+        "brown_trout", "striped_bass", "steelhead", "summer_flounder", "common_snook", "bluefish",
+        "mahi_mahi", "red_snapper", "pacific_halibut", "lingcod", "kokanee", "sheepshead", "black_drum",
+        "black_sea_bass", "tarpon", "yellowfin_tuna", "kelp_bass", "king_mackerel", "spanish_mackerel",
+        "cobia", "tautog", "atlantic_cod", "black_rockfish", "california_halibut", "gray_snapper",
         "white_crappie", "spotted_bass", "lake_trout", "chinook_salmon", "coho_salmon", "white_bass",
         "pumpkinseed", "redear_sunfish", "blue_catfish", "flathead_catfish", "muskellunge", "cutthroat_trout",
         "sockeye_salmon", "rock_bass", "hybrid_striped_bass", "sauger", "saugeye", "florida_bass",

@@ -141,7 +141,7 @@ enum WaterLevel: String, CaseIterable, Codable, Identifiable {
 }
 
 enum WaterBodyType: String, CaseIterable, Codable, Identifiable {
-    case lake, river, creek, pond, reservoir, bay, other
+    case lake, river, creek, pond, reservoir, bay, ocean, other
 
     var id: String { rawValue }
 
@@ -153,13 +153,14 @@ enum WaterBodyType: String, CaseIterable, Codable, Identifiable {
         case .pond: "Pond"
         case .reservoir: "Reservoir"
         case .bay: "Bay"
+        case .ocean: "Ocean"
         case .other: "Other"
         }
     }
 
     var symbolName: String {
         switch self {
-        case .lake, .pond, .reservoir: "water.waves"
+        case .lake, .pond, .reservoir, .ocean: "water.waves"
         case .river, .creek: "drop.fill"
         case .bay: "sailboat.fill"
         case .other: "mappin.and.ellipse"
