@@ -2,23 +2,25 @@ import Foundation
 
 /// The quick log grid's species, in order. Frozen for the life of a trip so a tile never moves under
 /// the thumb: counts change in place, and a species new to the grid goes at the end. The grid is
-/// re-ranked only between trips, so fish caught often still move up next time.
+/// re-ranked only between trips.
 struct TodayTileOrder: Equatable {
     /// The trip this order belongs to, or nil for the grid shown when no trip is running.
     var tripID: UUID?
     var speciesIDs: [String]
-    /// How many tiles came from ranking. Tiles after these were added during the trip, so trailing
-    /// ones can go again (after an Undo, say) without moving any tile before them.
+    /// How many tiles are settled: the ranked ones, and any kept on purpose since. Tiles after these
+    /// were added during the trip, so trailing ones can go again (after an Undo, say) without moving
+    /// any tile before them.
     var rankedCount: Int
 
-    /// Ranked tiles before the trip adds any. Favourites can go past it; they are never dropped.
+    /// Suggested tiles shown while there are no favourites. Favourites are never capped.
     static let maxRankedTiles = 12
     static let empty = TodayTileOrder(tripID: nil, speciesIDs: [], rankedCount: 0)
 
     private static let storageKey = "todayTileOrder"
 
-    /// Every favourite in the angler's order, then their usual catches, then popular fish for their
-    /// regions and the kinds of fish they picked at setup, so a new install still has a useful grid.
+    /// The angler's favourites in their order, and only those, once there are any. Until then, their
+    /// usual catches and popular fish for their regions and the kinds of fish they picked at setup,
+    /// so a new install still has a useful grid.
     static func ranked(
         tripID: UUID?,
         favourites: [String],
@@ -30,12 +32,20 @@ struct TodayTileOrder: Equatable {
         for id in favourites where isTileSpecies(id) && seen.insert(id).inserted {
             ids.append(id)
         }
-        for id in mostLogged + suggested {
-            guard ids.count < maxRankedTiles else { break }
-            guard isTileSpecies(id), seen.insert(id).inserted else { continue }
-            ids.append(id)
+        if ids.isEmpty {
+            for id in mostLogged + suggested {
+                guard ids.count < maxRankedTiles else { break }
+                guard isTileSpecies(id), seen.insert(id).inserted else { continue }
+                ids.append(id)
+            }
         }
         return TodayTileOrder(tripID: tripID, speciesIDs: ids, rankedCount: ids.count)
+    }
+
+    /// True once at least one favourite can have a tile, so the grid is the angler's favourites
+    /// rather than suggestions.
+    static func hasTileFavourites(_ favourites: [String]) -> Bool {
+        favourites.contains { isTileSpecies($0) }
     }
 
     /// Adds species that need a tile, such as one just caught through Other fish, at the end.
@@ -52,6 +62,13 @@ struct TodayTileOrder: Equatable {
         while speciesIDs.count > rankedCount, let last = speciesIDs.last, !needed.contains(last) {
             speciesIDs.removeLast()
         }
+    }
+
+    /// Settles a tile added during the trip, such as one whose catches were just reset, so trimming
+    /// never takes it away. Every tile before it is settled too, so nothing moves.
+    mutating func keep(_ id: String) {
+        guard let index = speciesIDs.firstIndex(of: id), index >= rankedCount else { return }
+        rankedCount = index + 1
     }
 
     /// Unknown fish have no tile of their own; Other fish covers them.

@@ -13,6 +13,8 @@ enum TodaySheet: Identifiable {
     case setSize(FishCatch)
     case pickSpecies
     case identify
+    /// This trip's catches of one species, from Details in the fish's long-press menu.
+    case speciesCatches(Trip, Species)
 
     var id: String {
         switch self {
@@ -28,18 +30,31 @@ enum TodaySheet: Identifiable {
             return "pickSpecies"
         case .identify:
             return "identify"
+        case .speciesCatches(let trip, let species):
+            return "speciesCatches-\(trip.id.uuidString)-\(species.id)"
         }
     }
 }
 
 /// What the tile order depends on. A change re-checks the grid; a running trip only ever grows it.
+/// Favourites are left out on purpose: a fish starred or unstarred from its own tile stays where it
+/// is until the screen next appears or a sheet closes, so picking favourites from the suggestions
+/// does not pull the grid apart under the thumb.
 private struct TodayGridKey: Equatable {
     let tripID: UUID?
     let catchCount: Int
-    let favourites: [String]
     let regions: Set<FishingRegion>
     let groups: Set<SpeciesGroup>
     let mostLogged: [String]?
+}
+
+/// A fish whose catches on the running trip wait on the Reset question.
+private struct TodayResetRequest {
+    let tripID: UUID
+    let speciesID: String
+    let name: String
+    /// Fish, not entries, so the question gives the count the tile showed.
+    let fish: Int
 }
 
 /// Whether the catch history behind the grid shown between trips changed since it was last fetched.
@@ -54,11 +69,13 @@ struct TodayView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Query(filter: #Predicate<Trip> { $0.endDate == nil }, sort: \Trip.startDate, order: .reverse)
     private var openTrips: [Trip]
 
     @State private var activeSheet: TodaySheet?
     @State private var showingEndConfirmation = false
+    @State private var pendingReset: TodayResetRequest?
     @State private var logged: TodayLoggedInfo?
     @State private var loggedCatch: FishCatch?
     /// The trip the confirmed log started, so Undo can take it away again if it is left empty.
@@ -194,22 +211,65 @@ struct TodayView: View {
         }
     }
 
-    /// The same one line in every state. Press and hold is in each tile's VoiceOver hint.
+    /// The same one line in every state, with Tiles or List beside it. Press and hold is in each
+    /// fish's VoiceOver hint. Until there are favourites, the grid shows suggestions and says how to
+    /// pick some.
     private func quickLogSection(counts: [String: Int]) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let species = tileOrder.speciesIDs.compactMap { SpeciesCatalog.species(id: $0) }
+        let footnote: String? = TodayTileOrder.hasTileFavourites(settings.favouriteSpeciesIDs)
+            ? nil
+            : "Long-press a fish to make it a favourite."
+        let actions = fishActions
+        let resetTitle: String = pendingReset.map { request in "Reset \(request.name.lowercased())?" } ?? "Reset?"
+        return VStack(alignment: .leading, spacing: 8) {
+            quickLogHeader
+            switch settings.todayFishLayout {
+            case .tiles:
+                TodayQuickLogGrid(species: species, counts: counts, footnote: footnote, actions: actions)
+            case .list:
+                TodayQuickLogList(species: species, counts: counts, footnote: footnote, actions: actions)
+            }
+        }
+        .confirmationDialog(
+            resetTitle,
+            isPresented: resetDialogBinding,
+            titleVisibility: .visible,
+            presenting: pendingReset
+        ) { request in
+            Button("Reset", role: .destructive) {
+                reset(request)
+            }
+            Button("Cancel", role: .cancel) {
+                pendingReset = nil
+            }
+        } message: { request in
+            Text(Self.resetMessage(for: request))
+        }
+    }
+
+    /// Side by side normally; stacked at the accessibility text sizes, where the line needs the width.
+    private var quickLogHeader: some View {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
+        return layout {
             Text("Tap a fish to log")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityAddTraits(.isHeader)
-            TodayQuickLogGrid(
-                species: tileOrder.speciesIDs.compactMap { SpeciesCatalog.species(id: $0) },
-                counts: counts,
-                onLog: { species, count in log(species, count: count) },
-                onLogWithDetails: { species in log(species, openDetails: true) },
-                onOtherFish: { activeSheet = .pickSpecies },
-                onPhotoID: { openPhotoID() }
-            )
+            TodayFishLayoutSwitch()
         }
+    }
+
+    private var fishActions: TodayFishActions {
+        TodayFishActions(
+            onLog: { species, count in log(species, count: count) },
+            onDetails: { species in showDetails(for: species) },
+            onReset: { species in askToReset(species) },
+            onOtherFish: { activeSheet = .pickSpecies },
+            onPhotoID: { openPhotoID() }
+        )
     }
 
     /// Floats under the navigation bar, over the trip header, so it never covers the tiles.
@@ -286,6 +346,10 @@ struct TodayView: View {
                 moveOffStaleTrip(fishCatch)
                 showLogged(for: fishCatch)
             })
+        case .speciesCatches(let trip, let species):
+            NavigationStack {
+                TodaySpeciesCatchesView(trip: trip, species: species)
+            }
         }
     }
 
@@ -301,7 +365,6 @@ struct TodayView: View {
         TodayGridKey(
             tripID: trip?.id,
             catchCount: trip?.catches.count ?? 0,
-            favourites: settings.favouriteSpeciesIDs,
             regions: settings.homeRegions,
             groups: settings.targetGroups,
             mostLogged: mostLoggedIDs
@@ -329,7 +392,7 @@ struct TodayView: View {
     }
 
     /// Keeps the grid steady. A running trip keeps the order it started with and only grows at the
-    /// end; with no trip, the grid is ranked fresh from favourites and history.
+    /// end; with no trip, the grid is ranked fresh: favourites, or suggestions while there are none.
     private func refreshTiles() {
         let favourites = settings.favouriteSpeciesIDs
         var order = tileOrder
@@ -346,7 +409,7 @@ struct TodayView: View {
             let caught = Self.caughtSpeciesIDs(in: trip)
             order.appendMissing(favourites + caught)
             order.trimTrailing(keeping: Set(favourites).union(caught))
-        } else if mostLoggedIDs != nil || order.speciesIDs.isEmpty {
+        } else if mostLoggedIDs != nil || order.speciesIDs.isEmpty || TodayTileOrder.hasTileFavourites(favourites) {
             order = rankedOrder(for: nil)
         } else {
             // Keep the last grid until history loads, so the tiles do not shuffle as the tab opens.
@@ -358,6 +421,11 @@ struct TodayView: View {
     }
 
     private func rankedOrder(for tripID: UUID?) -> TodayTileOrder {
+        let favourites = settings.favouriteSpeciesIDs
+        if TodayTileOrder.hasTileFavourites(favourites) {
+            // Favourites are the whole grid, so there is no history to wait for.
+            return TodayTileOrder.ranked(tripID: tripID, favourites: favourites, mostLogged: [], suggested: [])
+        }
         let history: [String]
         if let mostLoggedIDs {
             history = mostLoggedIDs
@@ -374,7 +442,7 @@ struct TodayView: View {
         ).map(\.id)
         return TodayTileOrder.ranked(
             tripID: tripID,
-            favourites: settings.favouriteSpeciesIDs,
+            favourites: favourites,
             mostLogged: history,
             suggested: suggested
         )
@@ -411,14 +479,11 @@ struct TodayView: View {
 
     // MARK: Logging
 
-    private func log(_ species: Species, count: Int = 1, openDetails: Bool = false) {
+    private func log(_ species: Species, count: Int = 1) {
         endStaleTripBeforeLogging()
         let fishCatch = CatchLogger.logCatch(speciesID: species.id, count: count, in: modelContext)
         Haptics.logged()
         showLogged(for: fishCatch)
-        if openDetails {
-            activeSheet = .editCatch(fishCatch)
-        }
     }
 
     private func logAnother(like fishCatch: FishCatch) {
@@ -434,6 +499,62 @@ struct TodayView: View {
         }
         CatchLogger.delete(fishCatch, in: modelContext)
         Haptics.warning()
+    }
+
+    // MARK: Details and Reset for one fish
+
+    /// Live catches of one species on the running trip.
+    private static func catches(of speciesID: String, in trip: Trip) -> [FishCatch] {
+        trip.catches.filter { !$0.isDeleted && $0.modelContext != nil && $0.speciesID == speciesID }
+    }
+
+    private func showDetails(for species: Species) {
+        guard let trip = activeTrip, !Self.catches(of: species.id, in: trip).isEmpty else { return }
+        activeSheet = .speciesCatches(trip, species)
+    }
+
+    private func askToReset(_ species: Species) {
+        guard let trip = activeTrip else { return }
+        let fish = Self.catches(of: species.id, in: trip).reduce(0) { $0 + $1.count }
+        guard fish > 0 else { return }
+        pendingReset = TodayResetRequest(tripID: trip.id, speciesID: species.id, name: species.commonName, fish: fish)
+    }
+
+    private var resetDialogBinding: Binding<Bool> {
+        Binding<Bool>(
+            get: { pendingReset != nil },
+            set: { isShown in
+                if !isShown { pendingReset = nil }
+            }
+        )
+    }
+
+    private static func resetMessage(for request: TodayResetRequest) -> String {
+        let name = request.name.lowercased()
+        if request.fish == 1 {
+            return "This removes the \(name) logged on this trip."
+        }
+        return "This removes the \(request.fish) \(name) logged on this trip."
+    }
+
+    /// Takes this trip's catches of the species away. The tile stays where it is with no count,
+    /// even one added during the trip, and the trip keeps running.
+    private func reset(_ request: TodayResetRequest) {
+        pendingReset = nil
+        guard let trip = activeTrip, trip.id == request.tripID else { return }
+        let catches = Self.catches(of: request.speciesID, in: trip)
+        guard !catches.isEmpty else { return }
+        if let loggedID = logged?.catchID, catches.contains(where: { $0.id == loggedID }) {
+            hideLogged()
+        }
+        // Settled before the deletes, so the refresh they set off does not trim the tile.
+        tileOrder.keep(request.speciesID)
+        tileOrder.save()
+        for fishCatch in catches {
+            CatchLogger.delete(fishCatch, in: modelContext)
+        }
+        Haptics.warning()
+        announce("\(request.fish) \(request.name.lowercased()) removed.")
     }
 
     /// Opening Photo ID leaves a flagged trip alone: only a fish logged there starts a new trip, so

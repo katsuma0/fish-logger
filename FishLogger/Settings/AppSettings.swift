@@ -84,6 +84,24 @@ enum SizeEntryMode: String, CaseIterable, Identifiable {
     var label: String { self == .category ? "Size class" : "Measure" }
 }
 
+/// How the fish on the Today screen are drawn.
+enum TodayFishLayout: String, CaseIterable, Identifiable {
+    case tiles, list
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .tiles: "Tiles"
+        case .list: "List"
+        }
+    }
+    var systemImage: String {
+        switch self {
+        case .tiles: "square.grid.2x2"
+        case .list: "list.bullet"
+        }
+    }
+}
+
 /// App preferences backed by UserDefaults. Reads go straight to UserDefaults so App Intents and
 /// the app always agree, and `access`/`withMutation` keep SwiftUI views updating. The few list
 /// settings that views read per row keep a parsed copy, refreshed by their setters, because every
@@ -121,6 +139,7 @@ final class AppSettings {
         static let tagCatchLocation = "tagCatchLocation"
         static let useBarometer = "useBarometer"
         static let favouriteSpeciesIDs = "favouriteSpeciesIDs"
+        static let todayFishLayout = "todayFishLayout"
         static let photoIDEnabled = "photoIDEnabled"
         static let claudeModel = "claudeModel"
         static let hasSeenWelcome = "hasSeenWelcome"
@@ -249,6 +268,12 @@ final class AppSettings {
         var ids = favouriteSpeciesIDs
         if let index = ids.firstIndex(of: speciesID) { ids.remove(at: index) } else { ids.append(speciesID) }
         favouriteSpeciesIDs = ids
+    }
+
+    /// Tiles or a list for the fish on Today.
+    var todayFishLayout: TodayFishLayout {
+        get { access(keyPath: \.todayFishLayout); return enumValue(Keys.todayFishLayout, default: .tiles) }
+        set { withMutation(keyPath: \.todayFishLayout) { defaults.set(newValue.rawValue, forKey: Keys.todayFishLayout) } }
     }
 
     // MARK: Photo ID
@@ -403,7 +428,8 @@ final class AppSettings {
             Keys.appearance, Keys.buttonSize, Keys.textSize, Keys.highContrast, Keys.hapticsEnabled,
             Keys.leftHanded, Keys.lengthUnit, Keys.weightUnit, Keys.temperatureUnit,
             Keys.pressureUnit, Keys.speedUnit, Keys.depthUnit, Keys.sizeEntryMode, Keys.autoFetchWeather,
-            Keys.tagCatchLocation, Keys.useBarometer, Keys.photoIDEnabled, Keys.claudeModel
+            Keys.tagCatchLocation, Keys.useBarometer, Keys.photoIDEnabled, Keys.claudeModel,
+            Keys.todayFishLayout
         ]
         for key in keys { defaults.removeObject(forKey: key) }
         // One mutation per property so every view watching settings refreshes.
@@ -425,6 +451,7 @@ final class AppSettings {
         useBarometer = useBarometer
         photoIDEnabled = photoIDEnabled
         claudeModel = claudeModel
+        todayFishLayout = todayFishLayout
     }
 
     // MARK: Helpers

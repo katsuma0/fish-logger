@@ -12,10 +12,9 @@ struct TodayQuickLogGrid: View {
     let species: [Species]
     /// Fish caught this trip, by species id.
     let counts: [String: Int]
-    let onLog: (Species, Int) -> Void
-    let onLogWithDetails: (Species) -> Void
-    let onOtherFish: () -> Void
-    let onPhotoID: () -> Void
+    /// The line under the tiles while there are no favourites yet.
+    let footnote: String?
+    let actions: TodayFishActions
 
     @Environment(AppSettings.self) private var settings
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -23,20 +22,11 @@ struct TodayQuickLogGrid: View {
     @ScaledMetric(relativeTo: .headline) private var baseTileHeight: CGFloat = 92
     @ScaledMetric(relativeTo: .headline) private var baseRowHeight: CGFloat = 60
 
-    init(
-        species: [Species],
-        counts: [String: Int],
-        onLog: @escaping (Species, Int) -> Void,
-        onLogWithDetails: @escaping (Species) -> Void,
-        onOtherFish: @escaping () -> Void,
-        onPhotoID: @escaping () -> Void
-    ) {
+    init(species: [Species], counts: [String: Int], footnote: String?, actions: TodayFishActions) {
         self.species = species
         self.counts = counts
-        self.onLog = onLog
-        self.onLogWithDetails = onLogWithDetails
-        self.onOtherFish = onOtherFish
-        self.onPhotoID = onPhotoID
+        self.footnote = footnote
+        self.actions = actions
     }
 
     var body: some View {
@@ -45,35 +35,39 @@ struct TodayQuickLogGrid: View {
             ? max(settings.buttonSize.minTapSize, baseRowHeight * settings.buttonSize.scale)
             : baseTileHeight * settings.buttonSize.scale
 
-        LazyVGrid(columns: columns, spacing: 10) {
-            ForEach(species) { item in
-                TodaySpeciesTile(
-                    species: item,
-                    count: counts[item.id] ?? 0,
+        VStack(alignment: .leading, spacing: 8) {
+            LazyVGrid(columns: columns, spacing: 10) {
+                ForEach(species) { item in
+                    TodaySpeciesTile(
+                        species: item,
+                        count: counts[item.id] ?? 0,
+                        style: style,
+                        minHeight: minHeight,
+                        actions: actions
+                    )
+                }
+                TodayActionTile(
+                    title: "Other fish",
+                    systemImage: "magnifyingglass",
+                    spokenLabel: "Other fish",
+                    hint: "Pick any species from the full list",
                     style: style,
                     minHeight: minHeight,
-                    onLog: { count in onLog(item, count) },
-                    onLogWithDetails: { onLogWithDetails(item) }
+                    action: actions.onOtherFish
+                )
+                TodayActionTile(
+                    title: "Photo ID",
+                    systemImage: "camera",
+                    spokenLabel: "Photo ID",
+                    hint: "Take or pick a photo and get a species suggestion",
+                    style: style,
+                    minHeight: minHeight,
+                    action: actions.onPhotoID
                 )
             }
-            TodayActionTile(
-                title: "Other fish",
-                systemImage: "magnifyingglass",
-                spokenLabel: "Other fish",
-                hint: "Pick any species from the full list",
-                style: style,
-                minHeight: minHeight,
-                action: onOtherFish
-            )
-            TodayActionTile(
-                title: "Photo ID",
-                systemImage: "camera",
-                spokenLabel: "Photo ID",
-                hint: "Take or pick a photo and get a species suggestion",
-                style: style,
-                minHeight: minHeight,
-                action: onPhotoID
-            )
+            if let footnote {
+                TodayFishFootnote(text: footnote)
+            }
         }
     }
 
@@ -113,8 +107,7 @@ private struct TodaySpeciesTile: View {
     let count: Int
     let style: TodayTileStyle
     let minHeight: CGFloat
-    let onLog: (Int) -> Void
-    let onLogWithDetails: () -> Void
+    let actions: TodayFishActions
 
     @Environment(AppSettings.self) private var settings
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
@@ -126,51 +119,31 @@ private struct TodaySpeciesTile: View {
         count: Int,
         style: TodayTileStyle,
         minHeight: CGFloat,
-        onLog: @escaping (Int) -> Void,
-        onLogWithDetails: @escaping () -> Void
+        actions: TodayFishActions
     ) {
         self.species = species
         self.count = count
         self.style = style
         self.minHeight = minHeight
-        self.onLog = onLog
-        self.onLogWithDetails = onLogWithDetails
+        self.actions = actions
     }
 
     var body: some View {
         let name = species.commonName
-        let isFavourite = settings.isFavourite(species.id)
         let spokenLabel = "Log \(name.lowercased())"
         let spokenValue = count > 0 ? "\(count) caught this trip" : "None caught this trip"
-        let favouriteTitle = isFavourite ? "Remove from favourites" : "Add to favourites"
 
         Button {
-            onLog(1)
+            actions.onLog(species, 1)
         } label: {
             label(name: name)
                 .contentShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
         }
         .buttonStyle(.plain)
-        .contextMenu {
-            Button { onLog(2) } label: { Label("Log 2", systemImage: "2.circle") }
-            Button { onLog(3) } label: { Label("Log 3", systemImage: "3.circle") }
-            Button { onLog(5) } label: { Label("Log 5", systemImage: "5.circle") }
-            Button { onLogWithDetails() } label: { Label("Log with details", systemImage: "square.and.pencil") }
-            Divider()
-            Button {
-                settings.toggleFavourite(species.id)
-            } label: {
-                Label(favouriteTitle, systemImage: isFavourite ? "star.slash" : "star")
-            }
-        }
+        .todayFishMenu(species: species, count: count, actions: actions)
         .accessibilityLabel(spokenLabel)
         .accessibilityValue(spokenValue)
         .accessibilityHint("Logs one fish. Press and hold for more.")
-        .accessibilityAction(named: Text("Log 2")) { onLog(2) }
-        .accessibilityAction(named: Text("Log 3")) { onLog(3) }
-        .accessibilityAction(named: Text("Log 5")) { onLog(5) }
-        .accessibilityAction(named: Text("Log with details")) { onLogWithDetails() }
-        .accessibilityAction(named: Text(favouriteTitle)) { settings.toggleFavourite(species.id) }
     }
 
     @ViewBuilder
