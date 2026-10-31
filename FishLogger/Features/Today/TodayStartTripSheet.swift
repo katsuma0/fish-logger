@@ -47,7 +47,7 @@ struct TodayStartTripSheet: View {
                 } header: {
                     Text("Where")
                 } footer: {
-                    Text("Leave it empty and the app names it from your location.")
+                    Text(whereFooter)
                 }
 
                 if !spotNames.isEmpty {
@@ -64,14 +64,14 @@ struct TodayStartTripSheet: View {
                 Section("How") {
                     Picker("Water", selection: $waterBody) {
                         ForEach(WaterBodyType.allCases) { type in
-                            Label(type.label, systemImage: type.symbolName).tag(type)
+                            Text(type.label).tag(type)
                         }
                     }
                     .pickerStyle(.menu)
                     .frame(minHeight: settings.buttonSize.minTapSize)
                     Picker("Fishing from", selection: $method) {
                         ForEach(FishingMethod.allCases) { option in
-                            Label(option.label, systemImage: option.symbolName).tag(option)
+                            Text(option.label).tag(option)
                         }
                     }
                     .pickerStyle(.menu)
@@ -97,7 +97,7 @@ struct TodayStartTripSheet: View {
                 Button {
                     start()
                 } label: {
-                    Label("Start fishing", systemImage: "figure.fishing")
+                    Text("Start fishing")
                 }
                 .buttonStyle(PrimaryActionButtonStyle())
                 .disabled(didStart)
@@ -110,6 +110,13 @@ struct TodayStartTripSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    private var whereFooter: String {
+        if LocationService.shared.isDenied {
+            return "Location is off, so the app cannot name the spot or get the weather. You can turn it on in the Settings app."
+        }
+        return "Leave it empty and the app names it from your location."
     }
 
     /// Marks the name as typed by hand, so a slow GPS answer never overwrites it.
@@ -150,7 +157,7 @@ struct TodayStartTripSheet: View {
                 .frame(minHeight: settings.buttonSize.minTapSize)
                 .foregroundStyle(isSelected ? Color.white : Color.primary)
                 .background(
-                    Capsule().fill(isSelected ? Theme.accentFill : Color(uiColor: .tertiarySystemFill))
+                    Capsule().fill(isSelected ? Theme.accentFillColor(strong: strong) : Color(uiColor: .tertiarySystemFill))
                 )
                 .overlay(
                     Capsule().strokeBorder(strong ? Color.primary : Color.clear, lineWidth: 1.5)

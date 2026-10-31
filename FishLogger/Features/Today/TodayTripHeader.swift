@@ -120,7 +120,6 @@ struct TodayTripHeader: View {
     private func statBlock(value: String, caption: String, spoken: String, prominent: Bool, stacked: Bool) -> some View {
         let valueText = Text(value)
             .font(prominent ? Font.largeTitle.bold() : Font.title2.bold())
-            .fontDesign(.rounded)
             .monospacedDigit()
         let captionText = Text(caption)
             .font(.caption)
@@ -219,75 +218,5 @@ struct TodayConditionsCard: View {
         }
         .buttonStyle(.bordered)
         .disabled(isFetchingWeather)
-    }
-}
-
-/// Status card shown when no trip is running. Opens the last trip when there is one, which is when
-/// people want to look back over the day.
-struct TodayIdleCard: View {
-    let summary: String
-    let onOpenLastTrip: (() -> Void)?
-
-    init(summary: String, onOpenLastTrip: (() -> Void)?) {
-        self.summary = summary
-        self.onOpenLastTrip = onOpenLastTrip
-    }
-
-    var body: some View {
-        if let onOpenLastTrip {
-            Button(action: onOpenLastTrip) {
-                content(showsChevron: true)
-            }
-            .buttonStyle(.plain)
-            .accessibilityHint("Opens your last trip")
-        } else {
-            content(showsChevron: false)
-                .accessibilityElement(children: .combine)
-        }
-    }
-
-    /// Plain text for the card, worked out once by the Today screen rather than on every render.
-    static func summaryText(todayTrips: Int, todayFish: Int, lastTrip: Trip?) -> String {
-        if todayTrips > 0 {
-            let tripWord = todayTrips == 1 ? "trip" : "trips"
-            return "Today: \(todayTrips) \(tripWord), \(todayFish) fish"
-        }
-        if let lastTrip {
-            let date = lastTrip.startDate.formatted(date: .abbreviated, time: .omitted)
-            return "Last trip: \(date), \(lastTrip.displayName)"
-        }
-        return "No trips yet. Start one below, or just tap a fish."
-    }
-
-    private func content(showsChevron: Bool) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Not fishing right now.")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .multilineTextAlignment(.leading)
-                Text(summary)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.leading)
-                if LocationService.shared.isDenied {
-                    Label("Location is off, so trips get no spot name or weather. You can turn it on in the Settings app.", systemImage: "location.slash")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 4)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            if showsChevron {
-                Image(systemName: "chevron.right")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-                    .accessibilityHidden(true)
-            }
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .cardBackground()
-        .contentShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
     }
 }

@@ -9,6 +9,7 @@ struct TodayStaleTripCard: View {
 
     @Environment(AppSettings.self) private var settings
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
     /// No fish for this long and the trip probably ended without anyone pressing End trip.
     static let quietInterval: TimeInterval = 8 * 60 * 60
@@ -88,7 +89,7 @@ struct TodayStaleTripCard: View {
                     .frame(maxWidth: .infinity, minHeight: settings.buttonSize.minTapSize)
             }
             .buttonStyle(.borderedProminent)
-            .tint(Theme.accentFill)
+            .tint(Theme.accentFillColor(strong: settings.usesStrongContrast(colorSchemeContrast)))
             .accessibilityHint(lastCatch == nil ? "Ends the trip at its start time" : "Ends the trip at your last fish")
 
             Button(action: onKeepGoing) {
