@@ -12,7 +12,10 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
     private(set) var authorizationStatus: CLAuthorizationStatus
 
     private let manager: CLLocationManager
-    @ObservationIgnored private var waiters: [CheckedContinuation<CLLocation?, Never>] = []
+    /// Callers waiting on a fix, by id, so each one is answered exactly once: by the next fix, a
+    /// failure, or its own timeout, whichever comes first.
+    @ObservationIgnored private var waiters: [UUID: CheckedContinuation<CLLocation?, Never>] = [:]
+    @ObservationIgnored private var timeouts: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private var isTracking = false
 
     override init() {
@@ -55,12 +58,14 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
             // Give the permission prompt a moment before asking for a fix.
             try? await Task.sleep(nanoseconds: 300_000_000)
         }
+        let id = UUID()
         return await withCheckedContinuation { continuation in
-            waiters.append(continuation)
+            waiters[id] = continuation
             manager.requestLocation()
-            Task { @MainActor [weak self] in
+            timeouts[id] = Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                self?.resumeWaiters(with: self?.lastLocation)
+                guard !Task.isCancelled else { return }
+                self?.resumeWaiter(id)
             }
         }
     }
@@ -98,10 +103,20 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
         return FishingRegion.from(administrativeArea: area)
     }
 
+    /// Answers every waiter and cancels their timeouts.
     private func resumeWaiters(with location: CLLocation?) {
-        let pending = waiters
+        let pending = Array(waiters.values)
         waiters.removeAll()
+        for timeout in timeouts.values { timeout.cancel() }
+        timeouts.removeAll()
         for waiter in pending { waiter.resume(returning: location) }
+    }
+
+    /// Timeout for one waiter. Does nothing if a fix already answered it.
+    private func resumeWaiter(_ id: UUID) {
+        timeouts[id] = nil
+        guard let waiter = waiters.removeValue(forKey: id) else { return }
+        waiter.resume(returning: lastLocation)
     }
 
     // MARK: CLLocationManagerDelegate

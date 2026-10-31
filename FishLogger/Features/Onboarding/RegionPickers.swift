@@ -41,7 +41,6 @@ struct RegionPickerSections: View {
     private func row(_ region: FishingRegion) -> some View {
         let isSelected = selection.contains(region)
         return Button {
-            Haptics.tap()
             if isSelected { selection.remove(region) } else { selection.insert(region) }
         } label: {
             HStack(spacing: 12) {
@@ -71,7 +70,6 @@ struct RegionPickerSections: View {
         let region = await LocationService.shared.currentRegion()
         isLocating = false
         if let region {
-            Haptics.logged()
             selection.insert(region)
         } else {
             Haptics.warning()
@@ -85,23 +83,28 @@ struct TargetFishGrid: View {
     @Binding var selection: Set<SpeciesGroup>
 
     @Environment(AppSettings.self) private var settings
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        LazyVGrid(
-            columns: [GridItem(.adaptive(minimum: max(150, settings.buttonSize.tileMinWidth * 1.4)), spacing: 10)],
-            spacing: 10
-        ) {
+        LazyVGrid(columns: columns, spacing: 10) {
             ForEach(SpeciesGroup.targetChoices) { group in
                 tile(group)
             }
         }
     }
 
+    /// One column at accessibility text sizes, so labels wrap instead of shrinking.
+    private var columns: [GridItem] {
+        if dynamicTypeSize.isAccessibilitySize {
+            return [GridItem(.flexible(), spacing: 10)]
+        }
+        return [GridItem(.adaptive(minimum: max(150, settings.buttonSize.tileMinWidth * 1.4)), spacing: 10)]
+    }
+
     private func tile(_ group: SpeciesGroup) -> some View {
         let isSelected = selection.contains(group)
         let species = SpeciesCatalog.species(id: group.representativeSpeciesID)
         return Button {
-            Haptics.tap()
             if isSelected { selection.remove(group) } else { selection.insert(group) }
         } label: {
             HStack(spacing: 10) {
@@ -110,8 +113,8 @@ struct TargetFishGrid: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
                     .multilineTextAlignment(.leading)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.8)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
@@ -157,7 +160,7 @@ struct FishingProfileView: View {
                     LabeledContent("What you fish for", value: targetSummary)
                 }
             } footer: {
-                Text("Species lists, the quick log, and photo ID stick to these regions. Any fish can still be found under Show all species.")
+                Text("Species lists, the quick log, and Photo ID start with fish from these regions. Search always finds every fish.")
             }
             Section {
                 LabeledContent("Species in your regions", value: "\(settings.regionalSpecies.count)")

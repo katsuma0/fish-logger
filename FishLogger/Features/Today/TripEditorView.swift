@@ -67,16 +67,19 @@ struct TripEditorView: View {
             TextField("Spot name", text: $trip.locationName)
                 .textInputAutocapitalization(.words)
                 .focused($focusedField, equals: .name)
+                .tripEditorRow(settings)
             Picker("Water", selection: $trip.waterBody) {
                 ForEach(WaterBodyType.allCases) { type in
                     Label(type.label, systemImage: type.symbolName).tag(type)
                 }
             }
+            .tripEditorRow(settings)
             Picker("Fishing from", selection: $trip.method) {
                 ForEach(FishingMethod.allCases) { option in
                     Label(option.label, systemImage: option.symbolName).tag(option)
                 }
             }
+            .tripEditorRow(settings)
             LabeledContent("Coordinates", value: coordinateText)
             Button {
                 Task { await useCurrentLocation() }
@@ -88,6 +91,7 @@ struct TripEditorView: View {
                         ProgressView()
                     }
                 }
+                .tripEditorRow(settings)
             }
             .disabled(isLocating)
             if let locationMessage {
@@ -108,6 +112,7 @@ struct TripEditorView: View {
                 in: ...(trip.endDate ?? Date.now),
                 displayedComponents: [.date, .hourAndMinute]
             )
+            .tripEditorRow(settings)
             if trip.endDate != nil {
                 DatePicker(
                     "Ended",
@@ -115,6 +120,7 @@ struct TripEditorView: View {
                     in: trip.startDate...,
                     displayedComponents: [.date, .hourAndMinute]
                 )
+                .tripEditorRow(settings)
             } else {
                 LabeledContent("Ended", value: "Still fishing")
             }
@@ -135,6 +141,7 @@ struct TripEditorView: View {
                     Label(condition.label, systemImage: condition.symbolName).tag(Optional(condition))
                 }
             }
+            .tripEditorRow(settings)
             numberRow(
                 "Air",
                 symbol: settings.temperatureUnit.symbol,
@@ -156,16 +163,18 @@ struct TripEditorView: View {
                     Text(Self.compassPoints[index]).tag(Optional(index))
                 }
             }
+            .tripEditorRow(settings)
             Button {
                 Task { await refreshWeather() }
             } label: {
                 HStack {
-                    Label("Refresh weather", systemImage: "arrow.clockwise")
+                    Label("Get weather", systemImage: "cloud.sun")
                     Spacer()
                     if isRefreshingWeather {
                         ProgressView()
                     }
                 }
+                .tripEditorRow(settings)
             }
             .disabled(isRefreshingWeather)
             if let weatherMessage {
@@ -176,7 +185,7 @@ struct TripEditorView: View {
         } header: {
             Text("Weather")
         } footer: {
-            Text("Refresh replaces these with the weather report for the trip's start time and place.")
+            Text("Get weather replaces these with the weather report for the trip's start time and place.")
         }
     }
 
@@ -194,6 +203,7 @@ struct TripEditorView: View {
                     Label(trend.label, systemImage: trend.symbolName).tag(Optional(trend))
                 }
             }
+            .tripEditorRow(settings)
             if BarometerService.shared.isAvailable {
                 Button {
                     Task { await readBarometer() }
@@ -205,6 +215,7 @@ struct TripEditorView: View {
                             ProgressView()
                         }
                     }
+                    .tripEditorRow(settings)
                 }
                 .disabled(isReadingBarometer)
             }
@@ -234,12 +245,14 @@ struct TripEditorView: View {
                     Text(clarity.label).tag(Optional(clarity))
                 }
             }
+            .tripEditorRow(settings)
             Picker("Level", selection: $trip.waterLevel) {
                 Text("Not set").tag(WaterLevel?.none)
                 ForEach(WaterLevel.allCases) { level in
                     Text(level.label).tag(Optional(level))
                 }
             }
+            .tripEditorRow(settings)
         } header: {
             Text("Water")
         }
@@ -294,6 +307,7 @@ struct TripEditorView: View {
                     .foregroundStyle(.secondary)
             }
         }
+        .tripEditorRow(settings)
     }
 
     private func unitBinding<U: DisplayUnit>(_ keyPath: ReferenceWritableKeyPath<Trip, Double?>, unit: U) -> Binding<Double?> {
@@ -432,5 +446,13 @@ struct TripEditorView: View {
             airTempC: trip.airTempC ?? 15
         )
         CatchLogger.save(modelContext)
+    }
+}
+
+private extension View {
+    /// Form rows follow the Button size setting, so wet or gloved hands hit them as easily as the
+    /// catch editor's rows.
+    func tripEditorRow(_ settings: AppSettings) -> some View {
+        frame(minHeight: settings.buttonSize.minTapSize)
     }
 }

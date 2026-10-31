@@ -14,11 +14,26 @@ final class BarometerService {
 
     @ObservationIgnored private let altimeter = CMAltimeter()
     @ObservationIgnored private var isRunning = false
-    @ObservationIgnored private var waiters: [CheckedContinuation<Double?, Never>] = []
+    /// True between `start()` and `stop()`, meaning a trip wants live readings. A one-off read
+    /// leaves the sensor running when this is set.
+    @ObservationIgnored private var isRequested = false
+    /// Callers waiting on a reading, by id, so each one is answered exactly once.
+    @ObservationIgnored private var waiters: [UUID: CheckedContinuation<Double?, Never>] = [:]
+    @ObservationIgnored private var timeouts: [UUID: Task<Void, Never>] = [:]
 
     var isAvailable: Bool { CMAltimeter.isRelativeAltitudeAvailable() }
 
     func start() {
+        isRequested = true
+        startUpdates()
+    }
+
+    func stop() {
+        isRequested = false
+        stopUpdates()
+    }
+
+    private func startUpdates() {
         guard isAvailable, !isRunning else { return }
         isRunning = true
         altimeter.startRelativeAltitudeUpdates(to: .main) { [weak self] data, _ in
@@ -31,7 +46,7 @@ final class BarometerService {
         }
     }
 
-    func stop() {
+    private func stopUpdates() {
         guard isRunning else { return }
         isRunning = false
         altimeter.stopRelativeAltitudeUpdates()
@@ -43,16 +58,18 @@ final class BarometerService {
         if let lastReadingDate, -lastReadingDate.timeIntervalSinceNow < 60, let stationPressureHPa {
             return stationPressureHPa
         }
-        let wasRunning = isRunning
-        start()
+        startUpdates()
+        let id = UUID()
         let value: Double? = await withCheckedContinuation { continuation in
-            waiters.append(continuation)
-            Task { @MainActor [weak self] in
+            waiters[id] = continuation
+            timeouts[id] = Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                self?.resumeWaiters(with: self?.stationPressureHPa)
+                guard !Task.isCancelled else { return }
+                self?.resumeWaiter(id)
             }
         }
-        if !wasRunning { stop() }
+        // Leave it running if a trip started it meanwhile or another read is still waiting.
+        if !isRequested, waiters.isEmpty { stopUpdates() }
         return value
     }
 
@@ -74,9 +91,19 @@ final class BarometerService {
         resumeWaiters(with: hPa)
     }
 
+    /// Answers every waiter and cancels their timeouts.
     private func resumeWaiters(with value: Double?) {
-        let pending = waiters
+        let pending = Array(waiters.values)
         waiters.removeAll()
+        for timeout in timeouts.values { timeout.cancel() }
+        timeouts.removeAll()
         for waiter in pending { waiter.resume(returning: value) }
+    }
+
+    /// Timeout for one waiter. Does nothing if a reading already answered it.
+    private func resumeWaiter(_ id: UUID) {
+        timeouts[id] = nil
+        guard let waiter = waiters.removeValue(forKey: id) else { return }
+        waiter.resume(returning: stationPressureHPa)
     }
 }

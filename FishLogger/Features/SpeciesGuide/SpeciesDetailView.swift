@@ -3,29 +3,44 @@ import SwiftUI
 import UIKit
 
 /// Field guide page for one species, with your own catches of it underneath. Pushed, never a root.
+/// Reads as reference first: logging is a plain bordered button, and it asks before starting a trip.
 struct SpeciesDetailView: View {
     let species: Species
 
     @Environment(AppSettings.self) private var settings
     @Environment(\.modelContext) private var modelContext
-    @Query(sort: \FishCatch.timestamp, order: .reverse) private var allCatches: [FishCatch]
+    /// This species only, newest first. Filtered in the store, so a long log never loads here.
+    @Query private var catches: [FishCatch]
+    /// The running trip, if any. Decides whether logging needs a trip started first.
+    @Query(filter: #Predicate<Trip> { $0.endDate == nil }) private var openTrips: [Trip]
     @State private var editingCatch: FishCatch?
-    @State private var confirmation: String?
-    @State private var confirmationID = 0
+    /// Shows the logged toast with Undo. The toast sets it back to nil when it hides.
+    @State private var loggedCatch: FishCatch?
+    @State private var confirmingStartTrip = false
+    /// The last catch logged here and the trip that logging started, if it started one. Undo then
+    /// takes the empty trip away too, so the page leaves things as they were. An id, not the model,
+    /// because reading a deleted model can crash.
+    @State private var lastLoggedID: UUID?
+    @State private var startedTrip: Trip?
 
     init(species: Species) {
         self.species = species
+        // A local constant, because the predicate macro cannot capture a property of self.
+        let speciesID = species.id
+        _catches = Query(
+            filter: #Predicate<FishCatch> { $0.speciesID == speciesID },
+            sort: \FishCatch.timestamp,
+            order: .reverse
+        )
     }
 
     var body: some View {
-        // Filtered in Swift because a predicate cannot reliably capture a property of a plain struct.
-        let catches = allCatches.filter { $0.speciesID == species.id }
         let isFavourite = settings.isFavourite(species.id)
         let favouriteLabel = isFavourite ? "Remove from favourites" : "Add to favourites"
 
         List {
             headerSection
-            logSection
+            logSection(hasTrip: !openTrips.isEmpty)
             identificationSection
             lookalikesSection
             sizeGuideSection
@@ -40,7 +55,6 @@ struct SpeciesDetailView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    Haptics.tap()
                     settings.toggleFavourite(species.id)
                 } label: {
                     Image(systemName: isFavourite ? "star.fill" : "star")
@@ -53,11 +67,9 @@ struct SpeciesDetailView: View {
                 CatchEditorView(fishCatch: fishCatch)
             }
         }
-        .task(id: confirmationID) {
-            guard confirmation != nil else { return }
-            try? await Task.sleep(nanoseconds: 3_000_000_000)
-            guard !Task.isCancelled else { return }
-            withAnimation { confirmation = nil }
+        .loggedToast($loggedCatch)
+        .onChange(of: loggedCatch == nil) { _, hidden in
+            if hidden { toastHidden() }
         }
     }
 
@@ -100,26 +112,39 @@ struct SpeciesDetailView: View {
         }
     }
 
-    @ViewBuilder
-    private var logSection: some View {
+    /// Says what will happen: with no trip running, the label and a question make the new trip plain.
+    private func logSection(hasTrip: Bool) -> some View {
         Section {
             Button {
-                logOne()
+                logTapped()
             } label: {
-                Label("Log one now", systemImage: "plus.circle.fill")
+                Label(hasTrip ? "Log one now" : "Start a trip and log one", systemImage: "plus.circle")
+                    .font(.headline)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity, minHeight: settings.buttonSize.minTapSize)
             }
-            .buttonStyle(PrimaryActionButtonStyle(tint: species.color))
+            .buttonStyle(.bordered)
             .listRowInsets(EdgeInsets())
             .listRowBackground(Color.clear)
-            .accessibilityHint("Adds one to the current trip. Starts a trip if none is running.")
-        } footer: {
-            if let confirmation {
-                Text(confirmation)
-                    .font(.subheadline)
-                    .foregroundStyle(.primary)
-                    .transition(.opacity)
+            .accessibilityHint(hasTrip ? "Adds one to the current trip." : "Asks before starting a trip.")
+            .confirmationDialog(
+                startTripQuestion,
+                isPresented: $confirmingStartTrip,
+                titleVisibility: .visible
+            ) {
+                Button("Start trip and log") { log() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("No trip is running, so this starts one here and now.")
             }
         }
+    }
+
+    /// "Start a trip and log a Walleye?", or "an" before a vowel, as in "an Arctic char".
+    private var startTripQuestion: String {
+        let name = species.commonName
+        let article = name.first.map { "AEIOUaeiou".contains($0) } == true ? "an" : "a"
+        return "Start a trip and log \(article) \(name)?"
     }
 
     @ViewBuilder
@@ -186,7 +211,7 @@ struct SpeciesDetailView: View {
                     SpeciesDetailTextRow(title: "Habitat", text: species.habitat)
                 }
                 if !species.range.isEmpty {
-                    SpeciesDetailTextRow(title: "Range in Canada", text: species.range)
+                    SpeciesDetailTextRow(title: "Range", text: species.range)
                 }
             }
         }
@@ -194,24 +219,49 @@ struct SpeciesDetailView: View {
 
     // MARK: Actions
 
-    private func logOne() {
+    /// Logs straight away during a trip. Reading the guide at home, a stray tap must not start a
+    /// trip with a fish in it, so with no trip running it asks first.
+    private func logTapped() {
+        if CatchLogger.activeTrip(in: modelContext) != nil {
+            log()
+        } else {
+            confirmingStartTrip = true
+        }
+    }
+
+    private func log() {
         let hadTrip = CatchLogger.activeTrip(in: modelContext) != nil
         let fishCatch = CatchLogger.logCatch(speciesID: species.id, in: modelContext)
         Haptics.logged()
         if !hadTrip, let trip = fishCatch.trip {
+            startedTrip = trip
             // A fresh trip still needs GPS, weather, and moon; fill them in without blocking the tap.
             Task {
                 await TripConditionsUpdater.refresh(trip, in: modelContext)
             }
+        } else {
+            startedTrip = nil
         }
-        let total = fishCatch.trip?.totalFish ?? fishCatch.count
-        let message = "Logged. \(total) this trip."
-        withAnimation {
-            confirmation = message
+        lastLoggedID = fishCatch.id
+        // The toast reads itself out for VoiceOver and offers Undo.
+        loggedCatch = fishCatch
+    }
+
+    /// Runs when the toast goes away, whether it timed out or Undo was tapped. After an Undo, a trip
+    /// that this page started and that now holds nothing is removed too.
+    private func toastHidden() {
+        guard let loggedID = lastLoggedID else { return }
+        let trip = startedTrip
+        lastLoggedID = nil
+        startedTrip = nil
+        guard let trip, !trip.isDeleted, trip.modelContext != nil else { return }
+        let stillLogged = FetchDescriptor<FishCatch>(predicate: #Predicate<FishCatch> { $0.id == loggedID })
+        // Timed out or closed: the catch is still there, so the trip stays.
+        guard ((try? modelContext.fetchCount(stillLogged)) ?? 1) == 0 else { return }
+        let hasCatches = trip.catches.contains { !$0.isDeleted && $0.modelContext != nil }
+        if !hasCatches {
+            CatchLogger.delete(trip, in: modelContext)
         }
-        confirmationID += 1
-        // The footer text is easy to miss with VoiceOver, so read it out too.
-        UIAccessibility.post(notification: .announcement, argument: message)
     }
 }
 

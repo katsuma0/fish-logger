@@ -9,11 +9,13 @@ struct CatchEditorView: View {
 
     @Environment(AppSettings.self) private var settings
     @Environment(\.dismiss) private var dismiss
-
-    @Query(CatchEditorQueries.recentCatches) private var recentCatches: [FishCatch]
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
     @State private var sizeMode: SizeEntryMode?
-    @State private var showingSpeciesPicker = false
+    /// Up to eight distinct lures from other catches, newest first. Fetched once when the editor
+    /// opens rather than kept live, so typing in the Lure field never walks past catches.
+    @State private var recentLures: [String] = []
+    @State private var didLoadRecentLures = false
     @State private var showingDeleteConfirmation = false
     @State private var didDelete = false
     @FocusState private var focusedField: CatchEditorField?
@@ -42,11 +44,12 @@ struct CatchEditorView: View {
     private var editor: some View {
         Form {
             speciesSection
+            // Right under the species, so Take photo is on screen when the editor opens.
+            CatchEditorPhotosSection(fishCatch: fishCatch)
             whenSection
             sizeSection
             releasedSection
             lureSection
-            CatchEditorPhotosSection(fishCatch: fishCatch)
             CatchEditorLocationSection(fishCatch: fishCatch)
             notesSection
             deleteSection
@@ -63,14 +66,8 @@ struct CatchEditorView: View {
                 Button("Done") { focusedField = nil }
             }
         }
-        .sheet(isPresented: $showingSpeciesPicker) {
-            NavigationStack {
-                SpeciesPickerView(title: "Change species", allowsUnknown: true, onPick: { species in
-                    pickSpecies(species)
-                })
-            }
-        }
         .onAppear { chooseInitialSizeMode() }
+        .task { loadRecentLures() }
     }
 
     // MARK: Species
@@ -86,9 +83,11 @@ struct CatchEditorView: View {
 
     private var speciesSection: some View {
         Section {
-            Button {
-                focusedField = nil
-                showingSpeciesPicker = true
+            // Pushed inside the editor's own navigation stack, so Back returns here with nothing lost.
+            NavigationLink {
+                SpeciesPickerView(title: "Change species", allowsUnknown: true, showsCancel: false, onPick: { species in
+                    pickSpecies(species)
+                })
             } label: {
                 HStack(spacing: 12) {
                     SpeciesIcon(species: fishCatch.species, size: settings.buttonSize.iconSize + 10)
@@ -104,15 +103,12 @@ struct CatchEditorView: View {
                         }
                     }
                     Spacer(minLength: 8)
-                    Text("Change")
-                        .foregroundStyle(Color.accentColor)
                 }
                 .frame(minHeight: settings.buttonSize.minTapSize)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
             .accessibilityLabel("Species, \(fishCatch.speciesName)")
-            .accessibilityHint("Opens the species list")
+            .accessibilityHint("Opens the species list to change it")
 
             if isUnknownSpecies {
                 TextField("Name it yourself", text: customNameBinding)
@@ -141,7 +137,7 @@ struct CatchEditorView: View {
     private func identificationNote(_ source: IdentificationSource) -> String {
         switch source {
         case .manual: "Species picked by hand."
-        case .claude: "Species from Claude photo ID."
+        case .claude: "Species from Photo ID."
         case .onDevice: "Species from the on-device model."
         case .traitKey: "Species from the feature checklist."
         }
@@ -321,16 +317,17 @@ struct CatchEditorView: View {
                 .focused($focusedField, equals: .lure)
                 .frame(minHeight: settings.buttonSize.minTapSize)
 
-            let lures = recentLures
-            if !lures.isEmpty {
+            if !recentLures.isEmpty {
+                // Trimmed once here, not once per chip.
+                let current = fishCatch.lure.trimmingCharacters(in: .whitespacesAndNewlines)
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Recent")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .accessibilityAddTraits(.isHeader)
                     FlowLayout(spacing: 8, lineSpacing: 8) {
-                        ForEach(lures, id: \.self) { lure in
-                            lureChip(lure)
+                        ForEach(recentLures, id: \.self) { lure in
+                            lureChip(lure, isCurrent: current.caseInsensitiveCompare(lure) == .orderedSame)
                         }
                     }
                 }
@@ -342,41 +339,31 @@ struct CatchEditorView: View {
         }
     }
 
-    /// Up to eight distinct lures from other catches, newest first.
-    private var recentLures: [String] {
-        let currentID = fishCatch.id
-        var seen = Set<String>()
-        var lures: [String] = []
-        for other in recentCatches {
-            if other.catchEditorIsGone || other.id == currentID { continue }
-            let lure = other.lure.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !lure.isEmpty, seen.insert(lure.lowercased()).inserted else { continue }
-            lures.append(lure)
-            if lures.count == 8 { break }
-        }
-        return lures
-    }
-
-    private func lureChip(_ lure: String) -> some View {
-        let current = fishCatch.lure.trimmingCharacters(in: .whitespacesAndNewlines)
-        let isCurrent = current.caseInsensitiveCompare(lure) == .orderedSame
+    /// No haptic: picking a chip is a plain selection, and the field changing is feedback enough.
+    private func lureChip(_ lure: String, isCurrent: Bool) -> some View {
+        // A capsule at one line. A long lure wraps instead of truncating, and keeps its text inside.
+        let chipShape = RoundedRectangle(cornerRadius: settings.buttonSize.minTapSize / 2, style: .continuous)
         return Button {
-            Haptics.tap()
             fishCatch.lure = lure
         } label: {
             Text(lure)
                 .font(.subheadline)
-                .lineLimit(1)
+                .lineLimit(3)
+                .multilineTextAlignment(.leading)
                 .padding(.horizontal, 12)
+                .padding(.vertical, 4)
                 .frame(minHeight: settings.buttonSize.minTapSize)
                 .foregroundStyle(isCurrent ? Color.white : Color.primary)
                 .background(
-                    Capsule().fill(isCurrent ? Color.accentColor : Color(uiColor: .tertiarySystemFill))
+                    chipShape.fill(isCurrent ? Theme.accentFill : Color(uiColor: .tertiarySystemFill))
                 )
                 .overlay(
-                    Capsule().strokeBorder(settings.highContrast ? Color.primary : Color.clear, lineWidth: 1.5)
+                    chipShape.strokeBorder(
+                        settings.usesStrongContrast(colorSchemeContrast) ? Color.primary : Color.clear,
+                        lineWidth: 1.5
+                    )
                 )
-                .contentShape(Capsule())
+                .contentShape(chipShape)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Use \(lure)")
@@ -428,7 +415,32 @@ struct CatchEditorView: View {
         }
     }
 
+    /// Fetches only the lure column of the latest 60 catches that have one, then keeps eight
+    /// distinct ones. Runs once per editor, not on every keystroke.
+    private func loadRecentLures() {
+        guard !didLoadRecentLures, let context = fishCatch.catchEditorLiveContext else { return }
+        didLoadRecentLures = true
+        let currentID = fishCatch.id
+        var descriptor = FetchDescriptor<FishCatch>(
+            predicate: #Predicate<FishCatch> { $0.lure != "" && $0.id != currentID },
+            sortBy: [SortDescriptor(\.timestamp, order: .reverse)]
+        )
+        descriptor.fetchLimit = 60
+        descriptor.propertiesToFetch = [\.lure]
+        let catches = (try? context.fetch(descriptor)) ?? []
+        var seen = Set<String>()
+        var lures: [String] = []
+        for other in catches where !other.isDeleted {
+            let lure = other.lure.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !lure.isEmpty, seen.insert(lure.lowercased()).inserted else { continue }
+            lures.append(lure)
+            if lures.count == 8 { break }
+        }
+        recentLures = lures
+    }
+
     private func pickSpecies(_ species: Species) {
+        focusedField = nil
         guard let context = fishCatch.catchEditorLiveContext else { return }
         let changed = species.id != fishCatch.speciesID
         if changed {
@@ -460,6 +472,7 @@ struct CatchEditorView: View {
         didDelete = true
         focusedField = nil
         CatchLogger.delete(fishCatch, in: context)
+        Haptics.warning()
         dismiss()
     }
 }

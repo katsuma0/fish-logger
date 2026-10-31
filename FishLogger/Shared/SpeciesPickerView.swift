@@ -7,6 +7,8 @@ struct SpeciesPickerView: View {
     var title: String = "Pick a species"
     /// Adds an "Unknown fish" row at the top.
     var allowsUnknown: Bool = true
+    /// Off when pushed onto a stack, where Back already does the job.
+    var showsCancel: Bool = true
     let onPick: (Species) -> Void
 
     @Environment(AppSettings.self) private var settings
@@ -14,14 +16,15 @@ struct SpeciesPickerView: View {
     @State private var query = ""
     @State private var showsAllRegions = false
 
-    private var regions: Set<FishingRegion> { showsAllRegions ? [] : settings.homeRegions }
-
     var body: some View {
+        // Read once per render and passed down, so rows never go back to settings.
+        let homeRegions = settings.homeRegions
+        let favouriteIDs = settings.favouriteSpeciesIDs
         List {
             if query.isEmpty {
-                browseContent
+                browseContent(homeRegions: homeRegions, favouriteIDs: favouriteIDs)
             } else {
-                searchContent
+                searchContent(homeRegions: homeRegions, favouriteIDs: Set(favouriteIDs))
             }
         }
         .listStyle(.insetGrouped)
@@ -30,33 +33,38 @@ struct SpeciesPickerView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
-                Button("Cancel") { dismiss() }
+                if showsCancel {
+                    Button("Cancel") { dismiss() }
+                }
             }
         }
     }
 
     @ViewBuilder
-    private var browseContent: some View {
+    private func browseContent(homeRegions: Set<FishingRegion>, favouriteIDs: [String]) -> some View {
+        let favouriteSet = Set(favouriteIDs)
         if allowsUnknown {
             Section {
-                row(SpeciesCatalog.unknown)
+                row(SpeciesCatalog.unknown, isFavourite: false)
             }
         }
-        let favourites = settings.favouriteSpeciesIDs.compactMap(SpeciesCatalog.species(id:))
+        let favourites = favouriteIDs.compactMap(SpeciesCatalog.species(id:))
         if !favourites.isEmpty {
             Section("Favourites") {
-                ForEach(favourites) { row($0) }
+                ForEach(favourites) { row($0, isFavourite: true) }
             }
         }
-        ForEach(SpeciesCatalog.grouped(in: regions), id: \.group) { entry in
+        // Cached per region set in the catalog, so this is a lookup, not a filter and sort.
+        ForEach(SpeciesCatalog.grouped(in: showsAllRegions ? [] : homeRegions), id: \.group) { entry in
             Section(entry.group.label) {
-                ForEach(entry.species) { row($0) }
+                ForEach(entry.species) { row($0, isFavourite: favouriteSet.contains($0.id)) }
             }
         }
-        if !settings.homeRegions.isEmpty {
+        if !homeRegions.isEmpty {
             Section {
                 Button {
-                    withAnimation { showsAllRegions.toggle() }
+                    // No animation: diffing dozens of rows would stutter, and the list jumps anyway.
+                    showsAllRegions.toggle()
                 } label: {
                     Label(
                         showsAllRegions ? "Only show my regions" : "Show fish from other regions",
@@ -71,29 +79,29 @@ struct SpeciesPickerView: View {
     }
 
     @ViewBuilder
-    private var searchContent: some View {
+    private func searchContent(homeRegions: Set<FishingRegion>, favouriteIDs: Set<String>) -> some View {
         let results = SpeciesCatalog.search(query)
-        let local = results.filter { $0.lives(in: settings.homeRegions) }
-        let elsewhere = results.filter { !$0.lives(in: settings.homeRegions) }
+        let local = results.filter { $0.lives(in: homeRegions) }
+        let elsewhere = results.filter { !$0.lives(in: homeRegions) }
         if results.isEmpty {
             ContentUnavailableView.search(text: query)
         } else {
             if !local.isEmpty {
                 Section {
-                    ForEach(local) { row($0) }
+                    ForEach(local) { row($0, isFavourite: favouriteIDs.contains($0.id)) }
                 }
             }
             if !elsewhere.isEmpty {
                 Section("Other regions") {
-                    ForEach(elsewhere) { row($0) }
+                    ForEach(elsewhere) { row($0, isFavourite: favouriteIDs.contains($0.id)) }
                 }
             }
         }
     }
 
-    private func row(_ species: Species) -> some View {
+    /// No haptic here: the screen that asked for the species confirms the pick.
+    private func row(_ species: Species, isFavourite: Bool) -> some View {
         Button {
-            Haptics.tap()
             onPick(species)
             dismiss()
         } label: {
@@ -110,7 +118,7 @@ struct SpeciesPickerView: View {
                     }
                 }
                 Spacer()
-                if settings.isFavourite(species.id) {
+                if isFavourite {
                     Image(systemName: "star.fill")
                         .foregroundStyle(.yellow)
                         .accessibilityLabel("Favourite")

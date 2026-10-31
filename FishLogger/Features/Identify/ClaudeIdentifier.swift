@@ -21,14 +21,22 @@ struct ClaudeIdentifier {
 
     // MARK: Network
 
-    func identify(image: UIImage, apiKey: String, model: String) async throws -> IdentificationResult {
-        try await Self.identify(image: image, apiKey: apiKey, model: model, session: session)
+    /// - Parameter regions: where the person fishes. Their fish are offered as the likely answers.
+    ///   Empty means all of North America.
+    func identify(
+        image: UIImage,
+        apiKey: String,
+        model: String,
+        regions: Set<FishingRegion> = []
+    ) async throws -> IdentificationResult {
+        try await Self.identify(image: image, apiKey: apiKey, model: model, regions: regions, session: session)
     }
 
     static func identify(
         image: UIImage,
         apiKey: String,
         model: String,
+        regions: Set<FishingRegion> = [],
         session: URLSession = .shared
     ) async throws -> IdentificationResult {
         guard let jpeg = ImageProcessing.identificationJPEG(from: image) else {
@@ -38,7 +46,8 @@ struct ClaudeIdentifier {
         let request = try makeURLRequest(
             imageBase64: jpeg.base64EncodedString(),
             apiKey: apiKey,
-            model: model
+            model: model,
+            regions: regions
         )
 
         let reply: (Data, URLResponse)
@@ -56,7 +65,12 @@ struct ClaudeIdentifier {
 
     // MARK: Request
 
-    static func makeURLRequest(imageBase64: String, apiKey: String, model: String) throws -> URLRequest {
+    static func makeURLRequest(
+        imageBase64: String,
+        apiKey: String,
+        model: String,
+        regions: Set<FishingRegion> = []
+    ) throws -> URLRequest {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.timeoutInterval = timeout
@@ -64,14 +78,19 @@ struct ClaudeIdentifier {
         request.setValue(apiVersion, forHTTPHeaderField: "anthropic-version")
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         request.setValue(betaHeader, forHTTPHeaderField: "anthropic-beta")
-        let body = makeRequestBody(imageBase64: imageBase64, model: model)
+        let body = makeRequestBody(imageBase64: imageBase64, model: model, regions: regions)
         // Sorted keys keep the schema byte-identical between calls, so the server reuses its compiled copy.
         request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys, .withoutEscapingSlashes])
         return request
     }
 
     /// The JSON body. No temperature, top_p, top_k, or thinking settings: this API version rejects them.
-    static func makeRequestBody(imageBase64: String, model: String) -> [String: Any] {
+    /// Only the prompt text depends on `regions`; the schema stays the same for every region set.
+    static func makeRequestBody(
+        imageBase64: String,
+        model: String,
+        regions: Set<FishingRegion> = []
+    ) -> [String: Any] {
         let trimmedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
         let imageSource: [String: Any] = [
             "type": "base64",
@@ -79,7 +98,7 @@ struct ClaudeIdentifier {
             "data": imageBase64
         ]
         let imageBlock: [String: Any] = ["type": "image", "source": imageSource]
-        let textBlock: [String: Any] = ["type": "text", "text": userPrompt]
+        let textBlock: [String: Any] = ["type": "text", "text": makeUserPrompt(regions: regions)]
         let content: [[String: Any]] = [imageBlock, textBlock]
         let message: [String: Any] = ["role": "user", "content": content]
         let messages: [[String: Any]] = [message]
@@ -91,7 +110,7 @@ struct ClaudeIdentifier {
         body["max_tokens"] = maxTokens
         body["fallbacks"] = "default"
         body["output_config"] = outputConfig
-        body["system"] = systemPrompt
+        body["system"] = makeSystemPrompt(regions: regions)
         body["messages"] = messages
         return body
     }
@@ -137,31 +156,87 @@ struct ClaudeIdentifier {
         return schema
     }
 
-    static let systemPrompt = """
-    You identify freshwater fish in photos taken by an angler in Canada, mostly in Ontario. \
-    Choose only from the species ids provided. \
-    Give up to 3 candidates, most likely first, each with a confidence from 0 to 1. \
-    The confidences together must add up to 1 or less. \
-    Each reason is one short sentence naming the visible feature that decided it, \
-    for example the white tip on the lower lobe of a walleye's tail. \
-    Weigh common lookalikes carefully: walleye and sauger; northern pike, muskellunge, tiger muskie, \
-    and chain pickerel; smallmouth and largemouth bass; black and white crappie; bluegill and pumpkinseed; \
-    brook trout, splake, and lake trout; chinook and coho salmon; white bass, white perch, and striped bass. \
-    If the photo shows no fish, set is_fish to false and return no candidates. \
-    In photo_notes, say briefly what limited the identification, such as blur or a fish that is partly \
-    hidden. Leave photo_notes empty if nothing did.
-    """
+    /// The prompt with no regions set, for all of North America.
+    static let systemPrompt: String = makeSystemPrompt(regions: [])
 
-    static let userPrompt: String = {
-        let lines: [String] = SpeciesCatalog.all.map { species in
-            if species.scientificName.isEmpty {
-                return "\(species.id): \(species.commonName)"
-            }
-            return "\(species.id): \(species.commonName) (\(species.scientificName))"
+    /// Names where the person fishes so Claude weighs local fish first, but never rules out the rest:
+    /// fish get stocked and moved, and anglers travel.
+    static func makeSystemPrompt(regions: Set<FishingRegion>) -> String {
+        let place: String
+        let regionalRule: String
+        if let names = regionNames(regions) {
+            place = "taken by an angler who fishes in \(names)."
+            // Ends in a space so it runs straight into the next sentence.
+            regionalRule = "The options list the fish of those regions first. Treat them as the most likely " +
+                "answers, but choose any species in the list when the photo clearly shows it, because fish " +
+                "get stocked and anglers travel. "
+        } else {
+            place = "taken by an angler in Canada or the United States."
+            regionalRule = ""
         }
+        return """
+        You identify freshwater fish in photos \(place) \
+        Choose only from the species ids provided. \
+        \(regionalRule)\
+        Give up to 3 candidates, most likely first, each with a confidence from 0 to 1. \
+        The confidences together must add up to 1 or less. \
+        Each reason is one short sentence naming the visible feature that decided it, \
+        for example the white tip on the lower lobe of a walleye's tail. \
+        Weigh common lookalikes carefully: walleye and sauger; northern pike, muskellunge, tiger muskie, \
+        and chain pickerel; smallmouth and largemouth bass; black and white crappie; bluegill and pumpkinseed; \
+        brook trout, splake, and lake trout; chinook and coho salmon; white bass, white perch, and striped bass. \
+        If the photo shows no fish, set is_fish to false and return no candidates. \
+        In photo_notes, say briefly what limited the identification, such as blur or a fish that is partly \
+        hidden. Leave photo_notes empty if nothing did.
+        """
+    }
+
+    /// Every catalog species with no region preference.
+    static let userPrompt: String = makeUserPrompt(regions: [])
+
+    /// The species options. With regions set, the fish of those regions come first under their own
+    /// heading and everything else follows, so every catalog id stays a valid answer.
+    static func makeUserPrompt(regions: Set<FishingRegion>) -> String {
         let unknownLine = "\(SpeciesCatalog.unknownID): Not in this list, or cannot tell"
-        return (["Which species is this? Options:"] + lines + [unknownLine]).joined(separator: "\n")
-    }()
+        guard let names = regionNames(regions) else {
+            let lines: [String] = SpeciesCatalog.all.map { optionLine($0) }
+            return (["Which species is this? Options:"] + lines + [unknownLine]).joined(separator: "\n")
+        }
+        let regional: [Species] = SpeciesCatalog.available(in: regions)
+        let regionalIDs = Set(regional.map(\.id))
+        let elsewhere: [Species] = SpeciesCatalog.all.filter { !regionalIDs.contains($0.id) }
+        var lines: [String] = ["Which species is this?", "Likely, because they live where I fish (\(names)):"]
+        lines.append(contentsOf: regional.map { optionLine($0) })
+        if !elsewhere.isEmpty {
+            lines.append("Also possible:")
+            lines.append(contentsOf: elsewhere.map { optionLine($0) })
+        }
+        lines.append(unknownLine)
+        return lines.joined(separator: "\n")
+    }
+
+    private static func optionLine(_ species: Species) -> String {
+        if species.scientificName.isEmpty {
+            return "\(species.id): \(species.commonName)"
+        }
+        return "\(species.id): \(species.commonName) (\(species.scientificName))"
+    }
+
+    /// "Ontario", "Ontario and Quebec", "Ontario, Quebec, and Upper Midwest", in the order regions are
+    /// declared so the prompt is the same for the same choice. Nil when no region is set.
+    static func regionNames(_ regions: Set<FishingRegion>) -> String? {
+        let names = FishingRegion.allCases.filter { regions.contains($0) }.map(\.label)
+        switch names.count {
+        case 0:
+            return nil
+        case 1:
+            return names[0]
+        case 2:
+            return "\(names[0]) and \(names[1])"
+        default:
+            return names.dropLast().joined(separator: ", ") + ", and " + names[names.count - 1]
+        }
+    }
 
     // MARK: Response
 

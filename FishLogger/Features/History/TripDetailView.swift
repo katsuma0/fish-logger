@@ -8,13 +8,21 @@ struct TripDetailView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @ScaledMetric(relativeTo: .body) private var mapHeight: CGFloat = 180
 
     @State private var activeSheet: TripDetailSheet? = nil
     @State private var photoSelection: TripDetailPhotoSelection? = nil
     @State private var isFetchingWeather = false
     @State private var weatherMessage: String? = nil
     @State private var confirmingDelete = false
+    /// Worked out when Delete is tapped, so a render never counts every photo on the trip.
+    @State private var deleteMessage = ""
     @State private var confirmingEnd = false
+    @State private var pendingCatchDelete: TripDetailCatchDeleteRequest? = nil
+    /// A catch just added from the species list. Its editor opens once the list has closed, so the time
+    /// and size can be set straight away.
+    @State private var pendingNewCatch: FishCatch? = nil
+    @State private var showingMap = false
     /// Set before deleting so the body stops reading the trip on the way out.
     @State private var didDelete = false
 
@@ -29,7 +37,7 @@ struct TripDetailView: View {
             ContentUnavailableView(
                 "Trip deleted",
                 systemImage: "trash",
-                description: Text("This trip is no longer in the log.")
+                description: Text("It is no longer in the Trips tab.")
             )
         } else {
             detail
@@ -37,20 +45,25 @@ struct TripDetailView: View {
     }
 
     private var detail: some View {
-        List {
+        // Sorted once per render and shared by every section that needs the catches.
+        let catches = trip.sortedCatches
+        let catchPins = HistoryMapPins.catchPins(for: catches, in: trip)
+        let spotPins = HistoryMapPins.spotPins(for: [trip])
+        let title = trip.displayName
+        return List {
             Section {
                 HistoryTripHeader(trip: trip)
             }
             conditionsSection
-            mapSection
+            mapSection(catchPins: catchPins, spotPins: spotPins)
             speciesSection
-            catchesSection
-            photosSection
+            catchesSection(catches)
+            photosSection(catches)
             notesSection
             deleteSection
         }
         .listStyle(.insetGrouped)
-        .navigationTitle(trip.displayName)
+        .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
@@ -60,7 +73,10 @@ struct TripDetailView: View {
                 Button("Edit") { activeSheet = .editTrip }
             }
         }
-        .sheet(item: $activeSheet) { sheet in
+        .navigationDestination(isPresented: $showingMap) {
+            HistoryTripMapPage(title: title, catchPins: catchPins, spotPins: spotPins)
+        }
+        .sheet(item: $activeSheet, onDismiss: openPendingNewCatch) { sheet in
             sheetContent(for: sheet)
         }
         .fullScreenCover(item: $photoSelection) { selection in
@@ -69,6 +85,19 @@ struct TripDetailView: View {
         .confirmationDialog("End this trip?", isPresented: $confirmingEnd, titleVisibility: .visible) {
             Button("End trip") { endTrip() }
             Button("Cancel", role: .cancel) {}
+        }
+        .confirmationDialog(
+            "Delete this catch?",
+            isPresented: isConfirmingCatchDelete,
+            titleVisibility: .visible,
+            presenting: pendingCatchDelete
+        ) { request in
+            Button("Delete catch", role: .destructive) {
+                deleteCatch(request.fishCatch)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { request in
+            Text(request.message)
         }
     }
 
@@ -157,15 +186,33 @@ struct TripDetailView: View {
         .padding(.vertical, 4)
     }
 
+    /// A still picture of the trip. Tapping it opens a full map that pans and zooms.
     @ViewBuilder
-    private var mapSection: some View {
-        let catchPins = HistoryMapPins.catchPins(for: [trip], speciesID: nil)
-        let spotPins = HistoryMapPins.spotPins(for: [trip])
+    private func mapSection(catchPins: [HistoryMapPin], spotPins: [HistoryMapPin]) -> some View {
         if !catchPins.isEmpty || !spotPins.isEmpty {
             Section {
-                HistoryTripMapSnippet(catchPins: catchPins, spotPins: spotPins)
-                    .frame(height: 180)
-                    .listRowInsets(EdgeInsets())
+                Button {
+                    showingMap = true
+                } label: {
+                    HistoryTripMapSnippet(catchPins: catchPins, spotPins: spotPins)
+                        // The button takes the tap; the map underneath only draws.
+                        .allowsHitTesting(false)
+                        // Grows with text size, capped so the map never fills the screen.
+                        .frame(height: min(mapHeight, 280))
+                        .overlay(alignment: .topTrailing) {
+                            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(.primary)
+                                .padding(8)
+                                .background(.regularMaterial, in: Circle())
+                                .padding(8)
+                                .accessibilityHidden(true)
+                        }
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Opens a bigger map you can move around")
+                .listRowInsets(EdgeInsets())
             }
         }
     }
@@ -185,9 +232,9 @@ struct TripDetailView: View {
         }
     }
 
-    private var catchesSection: some View {
-        let catches = trip.sortedCatches
-        let title: String = catches.isEmpty ? "Catches" : "Catches, \(HistoryText.fish(trip.totalFish))"
+    private func catchesSection(_ catches: [FishCatch]) -> some View {
+        let fish = catches.reduce(0) { $0 + $1.count }
+        let title: String = catches.isEmpty ? "Catches" : "Catches, \(HistoryText.fish(fish))"
         return Section {
             ForEach(catches) { fishCatch in
                 Button {
@@ -197,12 +244,14 @@ struct TripDetailView: View {
                 }
                 .foregroundStyle(.primary)
                 .accessibilityHint("Opens the catch details")
-                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                    Button(role: .destructive) {
-                        deleteCatch(fishCatch)
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    // Not a destructive role: that removes the row before the angler confirms.
+                    Button {
+                        askToDelete(fishCatch)
                     } label: {
                         Label("Delete", systemImage: "trash")
                     }
+                    .tint(.red)
                 }
             }
             Button {
@@ -222,8 +271,8 @@ struct TripDetailView: View {
     }
 
     @ViewBuilder
-    private var photosSection: some View {
-        let photos = trip.sortedCatches.flatMap { $0.sortedPhotos }
+    private func photosSection(_ catches: [FishCatch]) -> some View {
+        let photos = catches.flatMap { $0.sortedPhotos }
         if !photos.isEmpty {
             Section("Photos") {
                 HistoryPhotoStrip(photos: photos, onOpen: { index in
@@ -247,6 +296,7 @@ struct TripDetailView: View {
     private var deleteSection: some View {
         Section {
             Button(role: .destructive) {
+                deleteMessage = HistoryText.deleteMessage(for: trip)
                 confirmingDelete = true
             } label: {
                 Text("Delete trip")
@@ -259,9 +309,18 @@ struct TripDetailView: View {
                 Button("Delete trip", role: .destructive) { deleteTrip() }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text(HistoryText.deleteMessage(for: trip))
+                Text(deleteMessage)
             }
         }
+    }
+
+    private var isConfirmingCatchDelete: Binding<Bool> {
+        Binding(
+            get: { pendingCatchDelete != nil },
+            set: { isPresented in
+                if !isPresented { pendingCatchDelete = nil }
+            }
+        )
     }
 
     // MARK: Actions
@@ -284,14 +343,35 @@ struct TripDetailView: View {
     }
 
     private func addCatch(_ species: Species) {
-        guard !didDelete else { return }
-        CatchLogger.logCatch(speciesID: species.id, to: trip, in: modelContext)
+        guard !didDelete, !trip.historyIsGone else { return }
+        let fishCatch = CatchLogger.logCatch(speciesID: species.id, to: trip, in: modelContext)
         Haptics.logged()
+        pendingNewCatch = fishCatch
+    }
+
+    /// Runs whenever a sheet closes. After an add, the species list has just gone, so the new catch's
+    /// editor comes up. A catch added to a finished trip is stamped at the trip's end until its time is set.
+    private func openPendingNewCatch() {
+        guard let fishCatch = pendingNewCatch else { return }
+        pendingNewCatch = nil
+        guard !didDelete, !fishCatch.isDeleted, fishCatch.modelContext != nil else { return }
+        activeSheet = .editCatch(fishCatch)
+    }
+
+    /// The message is worked out now so the dialog never reads a catch that was just deleted.
+    private func askToDelete(_ fishCatch: FishCatch) {
+        pendingCatchDelete = TripDetailCatchDeleteRequest(
+            fishCatch: fishCatch,
+            message: HistoryText.catchDeleteMessage(for: fishCatch)
+        )
     }
 
     private func deleteCatch(_ fishCatch: FishCatch) {
+        // Clear the request first so nothing reads the catch after it is gone.
+        pendingCatchDelete = nil
+        guard !fishCatch.isDeleted, fishCatch.modelContext != nil else { return }
         CatchLogger.delete(fishCatch, in: modelContext)
-        Haptics.tap()
+        Haptics.warning()
     }
 
     private func endTrip() {
@@ -303,8 +383,9 @@ struct TripDetailView: View {
         didDelete = true
         activeSheet = nil
         photoSelection = nil
+        pendingNewCatch = nil
         CatchLogger.delete(trip, in: modelContext)
-        Haptics.tap()
+        Haptics.warning()
         dismiss()
     }
 }
@@ -328,6 +409,12 @@ private struct TripDetailSheet: Identifiable {
     static func editCatch(_ fishCatch: FishCatch) -> TripDetailSheet {
         TripDetailSheet(id: "editCatch-\(fishCatch.id.uuidString)", kind: .editCatch(fishCatch))
     }
+}
+
+/// A swipe Delete waiting for the angler to confirm.
+private struct TripDetailCatchDeleteRequest {
+    let fishCatch: FishCatch
+    let message: String
 }
 
 private struct TripDetailPhotoSelection: Identifiable {

@@ -5,14 +5,23 @@ import UIKit
 /// List row content for one catch. No NavigationLink inside; the caller decides what a tap does.
 struct CatchRow: View {
     let fishCatch: FishCatch
+    /// Shows the day above the time. Lists that mix days pass true; a catch from another day shows
+    /// its date anyway, so a column of times never hides which outing a fish came from.
+    var showsDate: Bool = false
 
     @Environment(AppSettings.self) private var settings
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+    @ScaledMetric(relativeTo: .headline) private var scaledImageSize: CGFloat = 44
 
-    init(fishCatch: FishCatch) {
+    init(fishCatch: FishCatch, showsDate: Bool = false) {
         self.fishCatch = fishCatch
+        self.showsDate = showsDate
     }
 
     var body: some View {
+        let isLargeText = dynamicTypeSize.isAccessibilitySize
+        let dateText = self.dateText
         HStack(spacing: 12) {
             leadingImage
 
@@ -30,32 +39,52 @@ struct CatchRow: View {
                 Text(detailLine)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                    .lineLimit(isLargeText ? 3 : 2)
+                // Large text has no room for a second column, so when and kept go underneath.
+                if isLargeText {
+                    whenAndKept(dateText: dateText, alignment: .leading)
+                }
             }
 
             Spacer(minLength: 8)
 
-            VStack(alignment: .trailing, spacing: 4) {
-                Text(timeText)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                if !fishCatch.released {
-                    keptBadge
-                }
+            if !isLargeText {
+                whenAndKept(dateText: dateText, alignment: .trailing)
             }
         }
         .frame(minHeight: settings.buttonSize.minTapSize)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(spokenSummary)
+        .accessibilityLabel(spokenSummary(dateText: dateText))
     }
 
     @ViewBuilder
     private var leadingImage: some View {
-        if let cover = fishCatch.sortedPhotos.first {
-            PhotoThumbnail(photo: cover, size: 44)
+        // Capped so the photo does not crowd out the text at the largest sizes.
+        let imageSize = min(scaledImageSize, 64)
+        // The oldest photo is the cover. min avoids sorting every photo on each render.
+        if let cover = fishCatch.photos.min(by: { $0.createdAt < $1.createdAt }) {
+            PhotoThumbnail(photo: cover, size: imageSize)
         } else {
-            SpeciesIcon(species: fishCatch.species, size: 44)
+            SpeciesIcon(species: fishCatch.species, size: imageSize)
+        }
+    }
+
+    private func whenAndKept(dateText: String?, alignment: HorizontalAlignment) -> some View {
+        VStack(alignment: alignment, spacing: 4) {
+            VStack(alignment: alignment, spacing: 0) {
+                if let dateText {
+                    Text(dateText)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                Text(timeText)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            if !fishCatch.released {
+                keptBadge
+            }
         }
     }
 
@@ -68,12 +97,23 @@ struct CatchRow: View {
             .background(Capsule().fill(Color(uiColor: .tertiarySystemFill)))
             .overlay(
                 Capsule()
-                    .strokeBorder(settings.highContrast ? Color.primary : Color.clear, lineWidth: 1)
+                    .strokeBorder(settings.usesStrongContrast(colorSchemeContrast) ? Color.primary : Color.clear, lineWidth: 1)
             )
     }
 
     private var timeText: String {
         fishCatch.timestamp.formatted(date: .omitted, time: .shortened)
+    }
+
+    /// "Oct 3", or "Oct 3, 2025" for another year. Nil for today's catches unless asked for.
+    private var dateText: String? {
+        let timestamp = fishCatch.timestamp
+        let calendar = Calendar.current
+        guard showsDate || !calendar.isDateInToday(timestamp) else { return nil }
+        if calendar.isDate(timestamp, equalTo: .now, toGranularity: .year) {
+            return timestamp.formatted(.dateTime.month(.abbreviated).day())
+        }
+        return timestamp.formatted(.dateTime.month(.abbreviated).day().year())
     }
 
     private var trimmedLure: String {
@@ -98,8 +138,8 @@ struct CatchRow: View {
         return lure.isEmpty ? sizeText : "\(sizeText) · \(lure)"
     }
 
-    /// Reads as one sentence: "Walleye, large, 7:42 PM, released".
-    private var spokenSummary: String {
+    /// Reads as one sentence: "Walleye, large, Oct 3, 7:42 PM, released".
+    private func spokenSummary(dateText: String?) -> String {
         var parts: [String] = [fishCatch.speciesName]
         if fishCatch.count > 1 { parts.append("\(fishCatch.count) fish") }
         if let measured = measuredText {
@@ -107,6 +147,7 @@ struct CatchRow: View {
         } else if let sizeClass = fishCatch.sizeClass {
             parts.append(sizeClass.label.lowercased())
         }
+        if let dateText { parts.append(dateText) }
         parts.append(timeText)
         parts.append(fishCatch.released ? "released" : "kept")
         let lure = trimmedLure
@@ -126,6 +167,7 @@ struct CatchRow: View {
     let fishCatch = CatchLogger.logCatch(speciesID: "walleye", count: 3, sizeClass: .large, in: container.mainContext)
     List {
         CatchRow(fishCatch: fishCatch)
+        CatchRow(fishCatch: fishCatch, showsDate: true)
     }
     .modelContainer(container)
     .environment(AppSettings.shared)

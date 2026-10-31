@@ -9,6 +9,8 @@ struct TodayCatchList: View {
     let onDelete: (FishCatch) -> Void
 
     @Environment(AppSettings.self) private var settings
+    /// Delete asks first: a stray tap in a rocking boat should not lose a fish.
+    @State private var pendingDelete: FishCatch?
 
     init(
         catches: [FishCatch],
@@ -33,6 +35,31 @@ struct TodayCatchList: View {
                 }
             }
         }
+        .confirmationDialog(
+            "Delete this catch?",
+            isPresented: deleteDialogBinding,
+            titleVisibility: .visible,
+            presenting: pendingDelete
+        ) { fishCatch in
+            Button("Delete", role: .destructive) {
+                pendingDelete = nil
+                onDelete(fishCatch)
+            }
+            Button("Cancel", role: .cancel) {
+                pendingDelete = nil
+            }
+        } message: { fishCatch in
+            Text("\(fishCatch.speciesName), \(fishCatch.timestamp.formatted(date: .omitted, time: .shortened))")
+        }
+    }
+
+    private var deleteDialogBinding: Binding<Bool> {
+        Binding<Bool>(
+            get: { pendingDelete != nil },
+            set: { isShown in
+                if !isShown { pendingDelete = nil }
+            }
+        )
     }
 
     private func row(for fishCatch: FishCatch) -> some View {
@@ -47,7 +74,7 @@ struct TodayCatchList: View {
             }
             .buttonStyle(.plain)
             .accessibilityHint("Opens the catch details")
-            .accessibilityAction(named: Text("Delete")) { onDelete(fishCatch) }
+            .accessibilityAction(named: Text("Delete")) { pendingDelete = fishCatch }
 
             Button {
                 onAnother(fishCatch)
@@ -80,7 +107,7 @@ struct TodayCatchList: View {
             }
             Divider()
             Button(role: .destructive) {
-                onDelete(fishCatch)
+                pendingDelete = fishCatch
             } label: {
                 Label("Delete", systemImage: "trash")
             }

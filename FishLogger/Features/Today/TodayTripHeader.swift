@@ -2,20 +2,37 @@ import SwiftData
 import SwiftUI
 import UIKit
 
-/// Summary card for the running trip: where, how long, how many, and the conditions.
+/// Date wording shared by the Today cards.
+enum TodayFormat {
+    /// "at 6:10 AM", "yesterday at 6:10 AM", or "Oct 29 at 6:10 AM", so a trip left running
+    /// overnight is easy to spot.
+    static func when(_ date: Date, now: Date = .now) -> String {
+        let time = date.formatted(date: .omitted, time: .shortened)
+        let calendar = Calendar.current
+        if calendar.isDate(date, inSameDayAs: now) { return "at \(time)" }
+        if let yesterday = calendar.date(byAdding: .day, value: -1, to: now),
+           calendar.isDate(date, inSameDayAs: yesterday) {
+            return "yesterday at \(time)"
+        }
+        let day = date.formatted(.dateTime.month(.abbreviated).day())
+        return "\(day) at \(time)"
+    }
+}
+
+/// Summary card for the running trip: where, how long, how many. Conditions live in their own card
+/// below the tiles, so chips filling in as the weather arrives never push the grid down.
 struct TodayTripHeader: View {
     let trip: Trip
-    let isFetchingWeather: Bool
+    let speciesCount: Int
     let onEdit: () -> Void
-    let onGetWeather: () -> Void
 
     @Environment(AppSettings.self) private var settings
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
-    init(trip: Trip, isFetchingWeather: Bool, onEdit: @escaping () -> Void, onGetWeather: @escaping () -> Void) {
+    init(trip: Trip, speciesCount: Int, onEdit: @escaping () -> Void) {
         self.trip = trip
-        self.isFetchingWeather = isFetchingWeather
+        self.speciesCount = speciesCount
         self.onEdit = onEdit
-        self.onGetWeather = onGetWeather
     }
 
     var body: some View {
@@ -49,34 +66,7 @@ struct TodayTripHeader: View {
             .buttonStyle(.plain)
             .accessibilityHint("Edit the spot and conditions")
 
-            HStack(alignment: .top, spacing: 12) {
-                statBlock(
-                    value: "\(trip.totalFish)",
-                    caption: "fish",
-                    spoken: trip.totalFish == 1 ? "1 fish" : "\(trip.totalFish) fish",
-                    prominent: true
-                )
-                statBlock(
-                    value: "\(speciesCount)",
-                    caption: "species",
-                    spoken: "\(speciesCount) species",
-                    prominent: false
-                )
-                TimelineView(.periodic(from: .now, by: 60)) { context in
-                    statBlock(
-                        value: Self.elapsedText(from: trip.startDate, to: context.date),
-                        caption: "on the water",
-                        spoken: Self.elapsedSpoken(from: trip.startDate, to: context.date),
-                        prominent: false
-                    )
-                }
-            }
-
-            ConditionsSummaryView(trip: trip)
-
-            if showsWeatherButton {
-                weatherButton
-            }
+            statRow
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -84,52 +74,72 @@ struct TodayTripHeader: View {
     }
 
     private var subtitle: String {
-        let start = trip.startDate.formatted(date: .omitted, time: .shortened)
-        return "\(trip.method.label), \(trip.waterBody.label.lowercased()). Started \(start)."
+        "\(trip.method.label), \(trip.waterBody.label.lowercased()). Started \(TodayFormat.when(trip.startDate))."
     }
 
-    private var speciesCount: Int {
-        trip.speciesTally.filter { $0.speciesID != SpeciesCatalog.unknownID }.count
-    }
+    /// Side by side normally; stacked at accessibility sizes so nothing truncates.
+    private var statRow: some View {
+        let stacked = dynamicTypeSize.isAccessibilitySize
+        let layout = stacked
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: 24))
+        let fish = trip.totalFish
 
-    private var showsWeatherButton: Bool {
-        settings.autoFetchWeather && trip.coordinate != nil && trip.weather == nil && trip.weatherFetchedAt == nil
-    }
-
-    private var weatherButton: some View {
-        Button(action: onGetWeather) {
-            HStack(spacing: 8) {
-                if isFetchingWeather {
-                    ProgressView()
-                } else {
-                    Image(systemName: "cloud.sun")
-                }
-                Text(isFetchingWeather ? "Getting weather" : "Get weather")
+        return layout {
+            statBlock(
+                value: "\(fish)",
+                caption: "fish",
+                spoken: fish == 1 ? "1 fish" : "\(fish) fish",
+                prominent: true,
+                stacked: stacked
+            )
+            .fixedSize(horizontal: !stacked, vertical: false)
+            statBlock(
+                value: "\(speciesCount)",
+                caption: "species",
+                spoken: "\(speciesCount) species",
+                prominent: false,
+                stacked: stacked
+            )
+            .fixedSize(horizontal: !stacked, vertical: false)
+            // Ticks on the trip's own minute marks, so the readout changes right when the minute does.
+            TimelineView(.periodic(from: trip.startDate, by: 60)) { context in
+                statBlock(
+                    value: Self.elapsedText(from: trip.startDate, to: context.date),
+                    caption: "on the water",
+                    spoken: Self.elapsedSpoken(from: trip.startDate, to: context.date),
+                    prominent: false,
+                    stacked: stacked
+                )
             }
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(Color.accentColor)
-            .padding(.horizontal, 14)
-            .frame(minHeight: settings.buttonSize.minTapSize)
-            .background(Capsule().fill(Color(uiColor: .tertiarySystemFill)))
-            .contentShape(Capsule())
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .buttonStyle(.plain)
-        .disabled(isFetchingWeather)
     }
 
-    private func statBlock(value: String, caption: String, spoken: String, prominent: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(value)
-                .font(prominent ? Font.largeTitle.bold() : Font.title2.bold())
-                .fontDesign(.rounded)
-                .monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-            Text(caption)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+    @ViewBuilder
+    private func statBlock(value: String, caption: String, spoken: String, prominent: Bool, stacked: Bool) -> some View {
+        let valueText = Text(value)
+            .font(prominent ? Font.largeTitle.bold() : Font.title2.bold())
+            .fontDesign(.rounded)
+            .monospacedDigit()
+        let captionText = Text(caption)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+        Group {
+            if stacked {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    valueText
+                    captionText
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    valueText
+                    captionText
+                }
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: stacked ? .infinity : nil, alignment: .leading)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(spoken)
     }
@@ -155,46 +165,129 @@ struct TodayTripHeader: View {
     }
 }
 
-/// Status card shown when no trip is running.
-struct TodayIdleCard: View {
-    let trips: [Trip]
+/// The running trip's conditions and the weather button. Sits below the tiles: it grows as GPS and
+/// weather fill in, and that must not move the grid.
+struct TodayConditionsCard: View {
+    let trip: Trip
+    let isFetchingWeather: Bool
+    let onGetWeather: () -> Void
 
-    init(trips: [Trip]) {
-        self.trips = trips
+    @Environment(AppSettings.self) private var settings
+
+    init(trip: Trip, isFetchingWeather: Bool, onGetWeather: @escaping () -> Void) {
+        self.trip = trip
+        self.isFetchingWeather = isFetchingWeather
+        self.onGetWeather = onGetWeather
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Not fishing right now.")
-                .font(.title3.weight(.semibold))
-            Text(summary)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            if LocationService.shared.isDenied {
-                Label("Location is off, so trips get no spot name or weather. You can turn it on in the Settings app.", systemImage: "location.slash")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 4)
+        if ConditionsSummaryView.hasConditions(trip) || showsWeatherButton {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Conditions")
+                    .font(.headline)
+                    .accessibilityAddTraits(.isHeader)
+                VStack(alignment: .leading, spacing: 12) {
+                    ConditionsSummaryView(trip: trip)
+                    if showsWeatherButton {
+                        weatherButton
+                    }
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .cardBackground()
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .cardBackground()
-        .accessibilityElement(children: .combine)
     }
 
-    private var summary: String {
-        let calendar = Calendar.current
-        let today = trips.filter { calendar.isDateInToday($0.startDate) }
-        if !today.isEmpty {
-            let fish = today.reduce(0) { $0 + $1.totalFish }
-            let tripWord = today.count == 1 ? "trip" : "trips"
-            return "Today: \(today.count) \(tripWord), \(fish) fish"
+    private var showsWeatherButton: Bool {
+        settings.autoFetchWeather && trip.coordinate != nil && trip.weather == nil && trip.weatherFetchedAt == nil
+    }
+
+    private var weatherButton: some View {
+        Button(action: onGetWeather) {
+            HStack(spacing: 8) {
+                if isFetchingWeather {
+                    ProgressView()
+                } else {
+                    Image(systemName: "cloud.sun")
+                        .accessibilityHidden(true)
+                }
+                Text(isFetchingWeather ? "Getting weather" : "Get weather")
+            }
+            .font(.subheadline.weight(.semibold))
+            .frame(minHeight: settings.buttonSize.minTapSize)
         }
-        if let last = trips.first {
-            let date = last.startDate.formatted(date: .abbreviated, time: .omitted)
-            return "Last trip: \(date), \(last.displayName)"
+        .buttonStyle(.bordered)
+        .disabled(isFetchingWeather)
+    }
+}
+
+/// Status card shown when no trip is running. Opens the last trip when there is one, which is when
+/// people want to look back over the day.
+struct TodayIdleCard: View {
+    let summary: String
+    let onOpenLastTrip: (() -> Void)?
+
+    init(summary: String, onOpenLastTrip: (() -> Void)?) {
+        self.summary = summary
+        self.onOpenLastTrip = onOpenLastTrip
+    }
+
+    var body: some View {
+        if let onOpenLastTrip {
+            Button(action: onOpenLastTrip) {
+                content(showsChevron: true)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Opens your last trip")
+        } else {
+            content(showsChevron: false)
+                .accessibilityElement(children: .combine)
+        }
+    }
+
+    /// Plain text for the card, worked out once by the Today screen rather than on every render.
+    static func summaryText(todayTrips: Int, todayFish: Int, lastTrip: Trip?) -> String {
+        if todayTrips > 0 {
+            let tripWord = todayTrips == 1 ? "trip" : "trips"
+            return "Today: \(todayTrips) \(tripWord), \(todayFish) fish"
+        }
+        if let lastTrip {
+            let date = lastTrip.startDate.formatted(date: .abbreviated, time: .omitted)
+            return "Last trip: \(date), \(lastTrip.displayName)"
         }
         return "No trips yet. Start one below, or just tap a fish."
+    }
+
+    private func content(showsChevron: Bool) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Not fishing right now.")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .multilineTextAlignment(.leading)
+                Text(summary)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+                if LocationService.shared.isDenied {
+                    Label("Location is off, so trips get no spot name or weather. You can turn it on in the Settings app.", systemImage: "location.slash")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 4)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if showsChevron {
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cardBackground()
+        .contentShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
     }
 }

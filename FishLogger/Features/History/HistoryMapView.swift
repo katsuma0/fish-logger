@@ -3,49 +3,74 @@ import MapKit
 import SwiftData
 import SwiftUI
 
+/// What the Trips map camera fits to. The camera only jumps back to show every pin when one of these
+/// changes, never while someone is typing a search or has panned to a spot.
+struct HistoryMapFitKey: Hashable {
+    var speciesID: String?
+    var time: HistoryTimeFilter
+    var day: Date?
+
+    init(speciesID: String?, time: HistoryTimeFilter, day: Date?) {
+        self.speciesID = speciesID
+        self.time = time
+        self.day = day
+    }
+}
+
+/// Everything the pins depend on. Pins are rebuilt in `.task(id:)` when it changes, never in `body`.
+private struct HistoryMapPinsKey: Equatable {
+    let contentVersion: Int
+    let tripCount: Int
+    let speciesID: String?
+    let fitKey: HistoryMapFitKey
+}
+
 /// Every geotagged catch in the filtered log, plus a marker for trips that only know where they started.
+/// Pins are MapKit markers, which stay smooth with hundreds on screen; past `HistoryMapPins.groupingThreshold`
+/// catches they are grouped into one marker per trip.
 struct HistoryMapView: View {
     let trips: [Trip]
     let speciesID: String?
+    /// Goes up when the trips or their catches change, so the pins are rebuilt.
+    let contentVersion: Int
+    let fitKey: HistoryMapFitKey
     let onSelect: (Trip) -> Void
 
     @Environment(AppSettings.self) private var settings
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @State private var position: MapCameraPosition = .automatic
-    @State private var selectedSpotID: UUID? = nil
+    @State private var selectedPinID: UUID? = nil
+    @State private var catchPins: [HistoryMapPin] = []
+    @State private var spotPins: [HistoryMapPin] = []
+    /// False until the first pins are in, so the empty card does not flash on open.
+    @State private var pinsReady = false
+    @State private var fittedKey: HistoryMapFitKey? = nil
 
-    init(trips: [Trip], speciesID: String?, onSelect: @escaping (Trip) -> Void) {
+    init(
+        trips: [Trip],
+        speciesID: String?,
+        contentVersion: Int = 0,
+        fitKey: HistoryMapFitKey? = nil,
+        onSelect: @escaping (Trip) -> Void
+    ) {
         self.trips = trips
         self.speciesID = speciesID
+        self.contentVersion = contentVersion
+        self.fitKey = fitKey ?? HistoryMapFitKey(speciesID: speciesID, time: .allTime, day: nil)
         self.onSelect = onSelect
     }
 
     var body: some View {
-        let catchPins = HistoryMapPins.catchPins(for: trips, speciesID: speciesID)
-        let tripsWithCatchPins = Set(catchPins.compactMap { $0.trip?.id })
-        let spotPins = HistoryMapPins.spotPins(for: trips, skipping: tripsWithCatchPins)
-        Map(position: $position, selection: $selectedSpotID) {
+        Map(position: $position, selection: $selectedPinID) {
             ForEach(spotPins) { pin in
                 Marker(pin.title, systemImage: "figure.fishing", coordinate: pin.coordinate)
                     .tint(Color.orange)
                     .tag(pin.id)
             }
             ForEach(catchPins) { pin in
-                Annotation(pin.title, coordinate: pin.coordinate) {
-                    Button {
-                        if let trip = pin.trip {
-                            onSelect(trip)
-                        }
-                    } label: {
-                        SpeciesIcon(species: pin.species, size: 26)
-                            .shadow(color: Color.black.opacity(0.3), radius: 2, x: 0, y: 1)
-                            .frame(width: settings.buttonSize.minTapSize, height: settings.buttonSize.minTapSize)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(pin.spokenLabel)
-                    .accessibilityHint("Opens the trip")
-                }
-                .annotationTitles(.hidden)
+                Marker(pin.title, systemImage: "fish.fill", coordinate: pin.coordinate)
+                    .tint(pin.species?.color ?? Color.gray)
+                    .tag(pin.id)
             }
         }
         .mapControls {
@@ -54,28 +79,48 @@ struct HistoryMapView: View {
             MapScaleView()
         }
         .overlay(alignment: .bottom) {
-            if catchPins.isEmpty && spotPins.isEmpty {
+            if pinsReady && catchPins.isEmpty && spotPins.isEmpty {
                 emptyCard
             }
         }
-        .onChange(of: selectedSpotID) { _, newValue in
+        .onChange(of: selectedPinID) { _, newValue in
             guard let newValue else { return }
-            // Markers cannot hold a button, so a selected trip marker opens its trip and clears itself.
-            selectedSpotID = nil
-            if let trip = trips.first(where: { $0.id == newValue }) {
+            // A marker opens its trip straight away, so the selection is only ever a tap.
+            selectedPinID = nil
+            let pin = catchPins.first(where: { $0.id == newValue }) ?? spotPins.first(where: { $0.id == newValue })
+            if let trip = pin?.trip, !trip.historyIsGone {
                 onSelect(trip)
             }
         }
-        .onChange(of: trips.map(\.id)) {
-            position = .automatic
+        .task(id: pinsKey) {
+            updatePins()
         }
-        .onChange(of: speciesID) {
+    }
+
+    private var pinsKey: HistoryMapPinsKey {
+        HistoryMapPinsKey(
+            contentVersion: contentVersion,
+            tripCount: trips.count,
+            speciesID: speciesID,
+            fitKey: fitKey
+        )
+    }
+
+    private func updatePins() {
+        let pins = HistoryMapPins.mapPins(for: trips, speciesID: speciesID)
+        catchPins = pins.catches
+        spotPins = pins.spots
+        pinsReady = true
+        // Refit only for a new species, time range or day, after the new pins are in place.
+        if fittedKey != fitKey {
+            fittedKey = fitKey
             position = .automatic
         }
     }
 
     private var emptyCard: some View {
-        VStack(spacing: 4) {
+        let strong = settings.usesStrongContrast(colorSchemeContrast)
+        return VStack(spacing: 4) {
             Text("Nothing to map yet")
                 .font(.headline)
             Text("Catches and trips show up here once they have a location.")
@@ -91,17 +136,16 @@ struct HistoryMapView: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous)
-                .strokeBorder(
-                    settings.highContrast ? Color.primary : Color.clear,
-                    lineWidth: settings.highContrast ? 2 : 0
-                )
+                .strokeBorder(strong ? Color.primary : Color.clear, lineWidth: strong ? 2 : 0)
         )
         .padding(16)
         .accessibilityElement(children: .combine)
     }
 }
 
-/// Small map for one trip: the trip spot and every geotagged catch.
+/// Small map for one trip: the trip spot and every geotagged catch. It does not pan or zoom, because it
+/// sits in a scrolling list and a drag on it should scroll the page. The trip's page wraps it in a
+/// button that opens `HistoryTripMapPage`.
 struct HistoryTripMapSnippet: View {
     let catchPins: [HistoryMapPin]
     let spotPins: [HistoryMapPin]
@@ -112,7 +156,7 @@ struct HistoryTripMapSnippet: View {
     }
 
     var body: some View {
-        Map(initialPosition: .automatic) {
+        Map(initialPosition: .automatic, interactionModes: []) {
             ForEach(spotPins) { pin in
                 Marker(pin.title, systemImage: "figure.fishing", coordinate: pin.coordinate)
                     .tint(Color.orange)
@@ -120,7 +164,6 @@ struct HistoryTripMapSnippet: View {
             ForEach(catchPins) { pin in
                 Annotation(pin.title, coordinate: pin.coordinate) {
                     SpeciesIcon(species: pin.species, size: 22)
-                        .shadow(color: Color.black.opacity(0.3), radius: 2, x: 0, y: 1)
                 }
                 .annotationTitles(.hidden)
             }
@@ -133,5 +176,38 @@ struct HistoryTripMapSnippet: View {
         let count = catchPins.count
         if count == 0 { return "Map of the trip spot" }
         return count == 1 ? "Map of the trip, 1 catch with a location" : "Map of the trip, \(count) catches with a location"
+    }
+}
+
+/// Full map of one trip that pans and zooms, pushed from the small map on the trip's page.
+struct HistoryTripMapPage: View {
+    let title: String
+    let catchPins: [HistoryMapPin]
+    let spotPins: [HistoryMapPin]
+
+    init(title: String, catchPins: [HistoryMapPin], spotPins: [HistoryMapPin]) {
+        self.title = title
+        self.catchPins = catchPins
+        self.spotPins = spotPins
+    }
+
+    var body: some View {
+        Map(initialPosition: .automatic) {
+            ForEach(spotPins) { pin in
+                Marker(pin.title, systemImage: "figure.fishing", coordinate: pin.coordinate)
+                    .tint(Color.orange)
+            }
+            ForEach(catchPins) { pin in
+                Marker(pin.title, systemImage: "fish.fill", coordinate: pin.coordinate)
+                    .tint(pin.species?.color ?? Color.gray)
+            }
+        }
+        .mapControls {
+            MapUserLocationButton()
+            MapCompass()
+            MapScaleView()
+        }
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
     }
 }

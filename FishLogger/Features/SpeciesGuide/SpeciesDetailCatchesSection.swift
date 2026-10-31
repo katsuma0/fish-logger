@@ -38,7 +38,8 @@ struct SpeciesDetailCatchesSection: View {
                     Button {
                         onOpen(fishCatch)
                     } label: {
-                        CatchRow(fishCatch: fishCatch)
+                        // These come from many days, so every row shows its date.
+                        CatchRow(fishCatch: fishCatch, showsDate: true)
                     }
                     .foregroundStyle(.primary)
                     .accessibilityHint("Opens the catch details")
@@ -76,7 +77,8 @@ struct SpeciesDetailCatchesSection: View {
         catches.compactMap { $0.weightKg }.max()
     }
 
+    /// Newest first, so the latest is the first one.
     private var lastCaught: Date? {
-        catches.map { $0.timestamp }.max()
+        catches.first?.timestamp
     }
 }

@@ -17,25 +17,34 @@ enum Theme {
     static let cardBackground = Color(uiColor: .secondarySystemGroupedBackground)
     static let screenBackground = Color(uiColor: .systemGroupedBackground)
     static let cornerRadius: CGFloat = 14
+    /// Accent for filled backgrounds behind white text. Darker than AccentColor so white text clears
+    /// 4.5:1 in light and dark mode. Asset "AccentFill". Keep AccentColor for tinted text and icons.
+    static let accentFill = Color("AccentFill")
+}
+
+extension AppSettings {
+    /// High contrast from the app setting or the system Increase Contrast switch.
+    func usesStrongContrast(_ contrast: ColorSchemeContrast) -> Bool {
+        highContrast || contrast == .increased
+    }
 }
 
 /// Rounded card used for tiles and summary blocks. High contrast swaps the soft fill for a hard border.
 struct CardBackground: ViewModifier {
     @Environment(AppSettings.self) private var settings
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     var tint: Color? = nil
 
     func body(content: Content) -> some View {
-        content
+        let strong = settings.usesStrongContrast(colorSchemeContrast)
+        return content
             .background(
                 RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous)
-                    .fill(tint.map { $0.opacity(settings.highContrast ? 0.35 : 0.15) } ?? Theme.cardBackground)
+                    .fill(tint.map { $0.opacity(strong ? 0.35 : 0.15) } ?? Theme.cardBackground)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous)
-                    .strokeBorder(
-                        settings.highContrast ? Color.primary : Color.clear,
-                        lineWidth: settings.highContrast ? 2 : 0
-                    )
+                    .strokeBorder(strong ? Color.primary : Color.clear, lineWidth: strong ? 2 : 0)
             )
     }
 }
@@ -57,14 +66,19 @@ extension View {
 }
 
 /// Big full-width button for the main action on a screen. Height follows the Button size setting.
+/// The default fill is `Theme.accentFill`, which keeps white text readable in dark mode.
 struct PrimaryActionButtonStyle: ButtonStyle {
     @Environment(AppSettings.self) private var settings
     @Environment(\.isEnabled) private var isEnabled
-    var tint: Color = .accentColor
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+    var tint: Color = Theme.accentFill
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
+        let strong = settings.usesStrongContrast(colorSchemeContrast)
+        return configuration.label
             .font(.headline)
+            .multilineTextAlignment(.center)
+            .padding(.vertical, 8)
             .frame(maxWidth: .infinity, minHeight: settings.buttonSize.primaryButtonHeight)
             .padding(.horizontal, 16)
             .foregroundStyle(.white)
@@ -75,9 +89,9 @@ struct PrimaryActionButtonStyle: ButtonStyle {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous)
-                    .strokeBorder(settings.highContrast ? Color.primary : Color.clear, lineWidth: 2)
+                    .strokeBorder(strong ? Color.primary : Color.clear, lineWidth: 2)
             )
-            .contentShape(Rectangle())
+            .contentShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
     }
 }
 
@@ -106,13 +120,18 @@ struct ConditionChip: View {
     let text: String
     var accessibilityLabel: String? = nil
 
+    @Environment(AppSettings.self) private var settings
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+
     var body: some View {
+        let strong = settings.usesStrongContrast(colorSchemeContrast)
         Label(text, systemImage: systemImage)
             .font(.subheadline)
             .labelStyle(.titleAndIcon)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(Capsule().fill(Color(uiColor: .tertiarySystemFill)))
+            .overlay(Capsule().strokeBorder(strong ? Color.primary : Color.clear, lineWidth: 1))
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(accessibilityLabel ?? text)
     }

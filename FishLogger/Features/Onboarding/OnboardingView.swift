@@ -7,6 +7,7 @@ struct OnboardingView: View {
 
     @Environment(AppSettings.self) private var settings
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var step: Step = .welcome
     @State private var regions: Set<FishingRegion> = []
     @State private var groups: Set<SpeciesGroup> = []
@@ -48,7 +49,7 @@ struct OnboardingView: View {
                 Section {
                     stepHeader(
                         title: "Where do you fish?",
-                        detail: "Pick one or more. You'll only see fish from these places. Change it any time in Settings."
+                        detail: "Pick one or more. Species lists start with fish from these places. Change it any time in Settings."
                     )
                 }
                 .listRowBackground(Color.clear)
@@ -106,14 +107,14 @@ struct OnboardingView: View {
                 stepHeader(title: "You're set", detail: doneDetail(count: count))
                 Text("Your quick log starts with")
                     .font(.headline)
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 10)], spacing: 10) {
+                LazyVGrid(columns: suggestionColumns, spacing: 10) {
                     ForEach(suggested) { species in
                         HStack(spacing: 10) {
                             SpeciesIcon(species: species, size: 30)
                             Text(species.commonName)
                                 .font(.subheadline)
-                                .lineLimit(2)
-                                .minimumScaleFactor(0.8)
+                                .lineLimit(3)
+                                .fixedSize(horizontal: false, vertical: true)
                             Spacer(minLength: 0)
                         }
                         .padding(10)
@@ -129,6 +130,14 @@ struct OnboardingView: View {
             .padding(16)
         }
         .background(Theme.screenBackground)
+    }
+
+    /// Two or more columns normally, one at accessibility text sizes so names do not break mid-word.
+    private var suggestionColumns: [GridItem] {
+        if dynamicTypeSize.isAccessibilitySize {
+            return [GridItem(.flexible(), spacing: 10)]
+        }
+        return [GridItem(.adaptive(minimum: 140), spacing: 10)]
     }
 
     private var bottomBar: some View {
@@ -149,7 +158,7 @@ struct OnboardingView: View {
         case .welcome: "Get started"
         case .regions: regions.isEmpty ? "Skip this step" : "Next"
         case .targets: groups.isEmpty ? "Skip this step" : "Next"
-        case .done: "Start fishing"
+        case .done: "Done"
         }
     }
 
@@ -191,7 +200,6 @@ struct OnboardingView: View {
 
     private func move(by offset: Int) {
         guard let next = Step(rawValue: step.rawValue + offset) else { return }
-        Haptics.tap()
         if reduceMotion {
             step = next
         } else {
@@ -207,8 +215,8 @@ struct OnboardingView: View {
         onFinish()
     }
 
+    /// Setup only saves choices. It never starts a trip, because people often set up at home.
     private func finish() {
-        Haptics.logged()
         skip()
     }
 }

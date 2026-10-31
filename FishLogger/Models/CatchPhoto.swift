@@ -21,10 +21,15 @@ final class CatchPhoto {
 }
 
 extension CatchPhoto {
-    /// Builds a photo with storage-sized and thumbnail JPEGs from any image.
+    /// Builds a photo with storage-sized and thumbnail JPEGs from any image. This encodes on the
+    /// calling thread; from the UI, use `CatchLogger.attachPhoto`, which encodes in the background.
     convenience init?(image: UIImage, createdAt: Date = .now) {
-        guard let full = ImageProcessing.storageJPEG(from: image) else { return nil }
-        self.init(imageData: full, thumbnailData: ImageProcessing.thumbnailJPEG(from: image), createdAt: createdAt)
+        guard let encoded = ImageProcessing.encodedPhoto(from: image) else { return nil }
+        self.init(encoded, createdAt: createdAt)
+    }
+
+    convenience init(_ encoded: EncodedPhoto, createdAt: Date = .now) {
+        self.init(imageData: encoded.imageData, thumbnailData: encoded.thumbnailData, createdAt: createdAt)
     }
 
     var thumbnailImage: UIImage? {

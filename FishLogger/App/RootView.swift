@@ -7,11 +7,17 @@ enum AppTab: String {
 }
 
 struct RootView: View {
+    /// Away longer than this with a trip running, and the app comes back on Today, ready to log.
+    /// Shorter app switches keep the tab the person was on.
+    private static let awayInterval: TimeInterval = 120
+
     @SceneStorage("selectedTab") private var selectedTab: AppTab = .today
     @Environment(AppSettings.self) private var settings
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
     @Query(filter: #Predicate<Trip> { $0.endDate == nil }) private var activeTrips: [Trip]
+    @State private var backgroundedAt: Date?
+    @State private var hasLaunched = false
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -19,7 +25,7 @@ struct RootView: View {
                 .tabItem { Label("Today", systemImage: "fish") }
                 .tag(AppTab.today)
             HistoryView()
-                .tabItem { Label("Log", systemImage: "calendar") }
+                .tabItem { Label("Trips", systemImage: "calendar") }
                 .tag(AppTab.history)
             StatsView()
                 .tabItem { Label("Stats", systemImage: "chart.bar.xaxis") }
@@ -36,10 +42,38 @@ struct RootView: View {
                 .environment(settings)
                 .appTextSize(settings.textSize)
         }
-        .onAppear(perform: syncSessionState)
+        .onAppear(perform: launch)
         .onChange(of: activeTrips.count) { syncSessionState() }
         .onChange(of: settings.keepScreenOn) { syncSessionState() }
-        .onChange(of: scenePhase) { syncSessionState() }
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .background:
+                backgroundedAt = .now
+            case .active:
+                returnToTodayIfAway()
+            default:
+                break
+            }
+            syncSessionState()
+        }
+    }
+
+    /// A cold launch during a trip opens on Today, whatever tab was saved, because the app was
+    /// most likely closed for a while.
+    private func launch() {
+        if !hasLaunched {
+            hasLaunched = true
+            if !activeTrips.isEmpty { selectedTab = .today }
+        }
+        syncSessionState()
+    }
+
+    private func returnToTodayIfAway() {
+        let awayFor = backgroundedAt.map { Date.now.timeIntervalSince($0) } ?? 0
+        backgroundedAt = nil
+        if awayFor > Self.awayInterval, !activeTrips.isEmpty {
+            selectedTab = .today
+        }
     }
 
     /// Finishing or skipping setup flips the setting, which closes the cover.

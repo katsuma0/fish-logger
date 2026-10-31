@@ -1,15 +1,17 @@
 import Foundation
 import SwiftData
 
-/// Which slice of the log the Stats screen looks at.
+/// Which slice of the log the Stats screen looks at. Same windows, order, and labels as the
+/// Trips tab filter, so "This month" means the same thing on both tabs.
 enum StatsRange: String, CaseIterable, Identifiable {
-    case last30Days, thisYear, allTime
+    case last30Days, thisMonth, thisYear, allTime
 
     var id: String { rawValue }
 
     var label: String {
         switch self {
-        case .last30Days: "30 days"
+        case .last30Days: "Last 30 days"
+        case .thisMonth: "This month"
         case .thisYear: "This year"
         case .allTime: "All time"
         }
@@ -21,6 +23,11 @@ enum StatsRange: String, CaseIterable, Identifiable {
         switch self {
         case .allTime:
             return nil
+        case .thisMonth:
+            if let month = calendar.dateInterval(of: .month, for: now) {
+                return month
+            }
+            return DateInterval(start: calendar.startOfDay(for: now), duration: 86_400)
         case .thisYear:
             if let year = calendar.dateInterval(of: .year, for: now) {
                 return year
@@ -44,12 +51,16 @@ enum StatsLimits {
     static let minimumHoursForRate: Double = 0.1
     static let lowPressureHPa: Double = 1005
     static let highPressureHPa: Double = 1022
+    /// Fewer trips than this and one lucky evening decides a whole condition chart.
+    static let minimumConditionTrips = 3
+    /// Rows in the Top spots and Top lures cards.
+    static let topListLimit = 5
 }
 
-/// Every number on the Stats screen, worked out once from a list of trips.
-/// Deterministic for a given input: `now` and `calendar` are injectable for tests.
-@MainActor
-struct StatsCalculator {
+/// Every number on the Stats screen, worked out once from plain copies of trips and catches.
+/// Pure and deterministic for a given input (`now` and `calendar` are injectable for tests), and
+/// free of SwiftData models, so it can run off the main thread.
+struct StatsCalculator: Sendable {
     let range: StatsRange
     let speciesID: String?
     let now: Date
@@ -57,9 +68,9 @@ struct StatsCalculator {
 
     /// Trips that started in range, oldest first. A species filter never removes trips, so
     /// per-hour rates still mean fish of that species per hour fished.
-    let trips: [Trip]
+    let trips: [StatsTripRecord]
     /// Catches on those trips, limited to `speciesID` when set, oldest first.
-    let catches: [FishCatch]
+    let catches: [StatsCatchRecord]
 
     /// Sum of `count`, so a logged school of perch counts as every fish in it.
     let totalFish: Int
@@ -84,11 +95,16 @@ struct StatsCalculator {
     let personalBests: [PersonalBest]
     /// Up to five spots, most fish first.
     let topSpots: [SpotCount]
+    /// Up to five lures, most fish first. Spellings that differ only in capitals or spaces count once.
+    let topLures: [LureCount]
 
     private let facts: [TripFact]
 
+    /// The pure entry point: plain trips and catches in, numbers out. Catches whose trip is not in
+    /// `allTrips` are ignored, the same as a catch with no trip.
     init(
-        trips allTrips: [Trip],
+        trips allTrips: [StatsTripRecord],
+        catches allCatches: [StatsCatchRecord],
         range: StatsRange = .allTime,
         speciesID: String? = nil,
         now: Date = .now,
@@ -103,18 +119,29 @@ struct StatsCalculator {
             return lhs.id.uuidString < rhs.id.uuidString
         }
 
+        // One pass over the catches, so each trip finds its own without scanning the whole list.
+        var catchesByTrip: [UUID: [StatsCatchRecord]] = [:]
+        for fishCatch in allCatches {
+            guard let tripID = fishCatch.tripID else { continue }
+            if let speciesID, fishCatch.speciesID != speciesID { continue }
+            catchesByTrip[tripID, default: []].append(fishCatch)
+        }
+
         var facts: [TripFact] = []
-        var filteredCatches: [FishCatch] = []
+        var filteredCatches: [StatsCatchRecord] = []
         facts.reserveCapacity(inRange.count)
         for trip in inRange {
-            let tripCatches = trip.catches.filter { speciesID == nil || $0.speciesID == speciesID }
+            let tripCatches = catchesByTrip[trip.id] ?? []
             filteredCatches.append(contentsOf: tripCatches)
             let fish = tripCatches.reduce(0) { $0 + $1.count }
             let seconds = max(0, (trip.endDate ?? now).timeIntervalSince(trip.startDate))
             let hours = min(seconds / 3600, StatsLimits.maxTripHours)
             facts.append(TripFact(trip: trip, fish: fish, hours: hours))
         }
-        filteredCatches.sort { $0.timestamp < $1.timestamp }
+        filteredCatches.sort { lhs, rhs in
+            if lhs.timestamp != rhs.timestamp { return lhs.timestamp < rhs.timestamp }
+            return lhs.id.uuidString < rhs.id.uuidString
+        }
 
         let totalFish = filteredCatches.reduce(0) { $0 + $1.count }
         let releasedFish = filteredCatches.reduce(0) { $0 + ($1.released ? $1.count : 0) }
@@ -140,6 +167,37 @@ struct StatsCalculator {
         self.sizeClassCounts = StatsCalculator.sizeCounts(filteredCatches)
         self.personalBests = StatsCalculator.bests(filteredCatches)
         self.topSpots = StatsCalculator.spots(facts)
+        self.topLures = StatsCalculator.lures(filteredCatches)
+    }
+
+    init(
+        input: StatsInput,
+        range: StatsRange = .allTime,
+        speciesID: String? = nil,
+        now: Date = .now,
+        calendar: Calendar = .current
+    ) {
+        self.init(
+            trips: input.trips,
+            catches: input.catches,
+            range: range,
+            speciesID: speciesID,
+            now: now,
+            calendar: calendar
+        )
+    }
+
+    /// Convenience for tests and previews that hold models. Copies them first, so it must run
+    /// on the main actor with the models' context.
+    @MainActor
+    init(
+        trips models: [Trip],
+        range: StatsRange = .allTime,
+        speciesID: String? = nil,
+        now: Date = .now,
+        calendar: Calendar = .current
+    ) {
+        self.init(input: StatsInput(trips: models), range: range, speciesID: speciesID, now: now, calendar: calendar)
     }
 
     // MARK: Rates
@@ -166,19 +224,29 @@ struct StatsCalculator {
     // MARK: Helpers for the screen
 
     /// Name for a species id, falling back to "Unknown fish" for ids the catalog does not know.
-    nonisolated static func speciesName(for speciesID: String) -> String {
+    static func speciesName(for speciesID: String) -> String {
         SpeciesCatalog.species(id: speciesID)?.commonName ?? "Unknown fish"
     }
 
-    /// Every species id in the log, by name. Used for the species filter.
-    nonisolated static func loggedSpeciesIDs(in trips: [Trip]) -> [String] {
+    /// Every species id among these catches, by name. Used for the species filter.
+    static func loggedSpeciesIDs(in catches: [StatsCatchRecord]) -> [String] {
+        sortedByName(Set(catches.map(\.speciesID)))
+    }
+
+    /// Every species id in the log, by name. Reads models, so call it on the main actor.
+    @MainActor
+    static func loggedSpeciesIDs(in trips: [Trip]) -> [String] {
         var ids = Set<String>()
         for trip in trips {
             for fishCatch in trip.catches {
                 ids.insert(fishCatch.speciesID)
             }
         }
-        return ids.sorted { lhs, rhs in
+        return sortedByName(ids)
+    }
+
+    private static func sortedByName(_ ids: Set<String>) -> [String] {
+        ids.sorted { lhs, rhs in
             let left = speciesName(for: lhs)
             let right = speciesName(for: rhs)
             return left == right ? lhs < rhs : left < right
@@ -189,7 +257,7 @@ struct StatsCalculator {
 // MARK: Result types
 
 extension StatsCalculator {
-    struct SpeciesCount: Identifiable {
+    struct SpeciesCount: Identifiable, Sendable {
         let speciesID: String
         let count: Int
 
@@ -198,7 +266,7 @@ extension StatsCalculator {
         var name: String { StatsCalculator.speciesName(for: speciesID) }
     }
 
-    struct HourCount: Identifiable {
+    struct HourCount: Identifiable, Sendable {
         /// 0 to 23.
         let hour: Int
         let count: Int
@@ -206,7 +274,7 @@ extension StatsCalculator {
         var id: Int { hour }
     }
 
-    struct MonthCount: Identifiable {
+    struct MonthCount: Identifiable, Sendable {
         /// Start of the month on the calculator's calendar.
         let month: Date
         let count: Int
@@ -215,7 +283,7 @@ extension StatsCalculator {
         var id: Date { month }
     }
 
-    struct SizeClassCount: Identifiable {
+    struct SizeClassCount: Identifiable, Sendable {
         let sizeClass: SizeClass
         let count: Int
 
@@ -223,30 +291,52 @@ extension StatsCalculator {
     }
 
     /// Longest and heaviest come only from measured values, never from size class estimates.
-    struct PersonalBest: Identifiable {
+    /// Each record keeps its catch id, so the row can open that exact fish.
+    struct PersonalBest: Identifiable, Sendable {
         let speciesID: String
         var longestCm: Double? = nil
         var heaviestKg: Double? = nil
         var biggestClass: SizeClass? = nil
         var longestCatchDate: Date? = nil
         var heaviestCatchDate: Date? = nil
+        var longestCatchID: UUID? = nil
+        var heaviestCatchID: UUID? = nil
+        var biggestClassCatchID: UUID? = nil
 
         var id: String { speciesID }
         var species: Species? { SpeciesCatalog.species(id: speciesID) }
         var name: String { StatsCalculator.speciesName(for: speciesID) }
+
+        /// The catch a tap opens: the longest fish, else the heaviest, else the biggest by class.
+        var recordCatchID: UUID? { longestCatchID ?? heaviestCatchID ?? biggestClassCatchID }
     }
 
-    struct SpotCount: Identifiable {
+    struct SpotCount: Identifiable, Sendable {
         /// The trip's display name, so blank names group as "Unnamed spot".
         let name: String
         let fish: Int
         let trips: Int
+        /// The trips in range at this spot, newest first, so a tap can list them.
+        var tripIDs: [UUID] = []
 
         var id: String { name }
     }
 
+    /// One lure after folding spellings together.
+    struct LureCount: Identifiable, Sendable {
+        /// Lowercased and trimmed. Two catches with the same key are the same lure.
+        let key: String
+        /// The spelling typed most often, newest winning a tie.
+        let name: String
+        let fish: Int
+        /// Log entries, which is fewer than `fish` when a catch holds several fish.
+        let catches: Int
+
+        var id: String { key }
+    }
+
     /// Fish per hour for one bucket of a condition. Only trips with the condition recorded count.
-    struct ConditionRate: Identifiable {
+    struct ConditionRate: Identifiable, Sendable {
         let label: String
         let trips: Int
         let hours: Double
@@ -260,8 +350,8 @@ extension StatsCalculator {
         var id: String { label }
     }
 
-    fileprivate struct TripFact {
-        let trip: Trip
+    fileprivate struct TripFact: Sendable {
+        let trip: StatsTripRecord
         /// Fish on this trip after the species filter.
         let fish: Int
         /// Capped duration.
@@ -269,10 +359,25 @@ extension StatsCalculator {
     }
 }
 
+/// One condition chart: its rates and how many trips had the condition recorded.
+struct StatsConditionGroup: Identifiable, Sendable {
+    let title: String
+    let rates: [StatsCalculator.ConditionRate]
+    let recordedTrips: Int
+    var note: String? = nil
+
+    var id: String { title }
+
+    /// Below the minimum, one lucky trip would decide the chart, so it is left off the screen.
+    var hasEnoughTrips: Bool {
+        recordedTrips >= StatsLimits.minimumConditionTrips && !rates.isEmpty
+    }
+}
+
 // MARK: Aggregation
 
 extension StatsCalculator {
-    fileprivate static func speciesCounts(_ catches: [FishCatch]) -> [SpeciesCount] {
+    fileprivate static func speciesCounts(_ catches: [StatsCatchRecord]) -> [SpeciesCount] {
         var totals: [String: Int] = [:]
         for fishCatch in catches {
             totals[fishCatch.speciesID, default: 0] += fishCatch.count
@@ -286,7 +391,7 @@ extension StatsCalculator {
             }
     }
 
-    fileprivate static func hourCounts(_ catches: [FishCatch], calendar: Calendar) -> [HourCount] {
+    fileprivate static func hourCounts(_ catches: [StatsCatchRecord], calendar: Calendar) -> [HourCount] {
         var totals = Array(repeating: 0, count: 24)
         for fishCatch in catches {
             let hour = calendar.component(.hour, from: fishCatch.timestamp)
@@ -311,30 +416,35 @@ extension StatsCalculator {
         }
     }
 
-    fileprivate static func sizeCounts(_ catches: [FishCatch]) -> [SizeClassCount] {
+    fileprivate static func sizeCounts(_ catches: [StatsCatchRecord]) -> [SizeClassCount] {
         var totals: [SizeClass: Int] = [:]
         for fishCatch in catches {
-            if let size = fishCatch.effectiveSizeClass {
+            if let size = fishCatch.sizeClass {
                 totals[size, default: 0] += fishCatch.count
             }
         }
         return SizeClass.allCases.map { SizeClassCount(sizeClass: $0, count: totals[$0] ?? 0) }
     }
 
-    fileprivate static func bests(_ catches: [FishCatch]) -> [PersonalBest] {
+    /// Catches arrive oldest first, so on a tie the first fish to set the record keeps it.
+    fileprivate static func bests(_ catches: [StatsCatchRecord]) -> [PersonalBest] {
         var byID: [String: PersonalBest] = [:]
         for fishCatch in catches where fishCatch.speciesID != SpeciesCatalog.unknownID {
             var best = byID[fishCatch.speciesID] ?? PersonalBest(speciesID: fishCatch.speciesID)
             if let length = fishCatch.lengthCm, length > 0, length > (best.longestCm ?? 0) {
                 best.longestCm = length
                 best.longestCatchDate = fishCatch.timestamp
+                best.longestCatchID = fishCatch.id
             }
             if let weight = fishCatch.weightKg, weight > 0, weight > (best.heaviestKg ?? 0) {
                 best.heaviestKg = weight
                 best.heaviestCatchDate = fishCatch.timestamp
+                best.heaviestCatchID = fishCatch.id
             }
-            if let size = fishCatch.effectiveSizeClass {
-                best.biggestClass = max(size, best.biggestClass ?? size)
+            // Strictly bigger only, so the earlier fish keeps a tied class.
+            if let size = fishCatch.sizeClass, best.biggestClass.map({ size > $0 }) ?? true {
+                best.biggestClass = size
+                best.biggestClassCatchID = fishCatch.id
             }
             byID[fishCatch.speciesID] = best
         }
@@ -347,50 +457,128 @@ extension StatsCalculator {
     fileprivate static func spots(_ facts: [TripFact]) -> [SpotCount] {
         var fish: [String: Int] = [:]
         var trips: [String: Int] = [:]
-        for fact in facts {
-            let name = fact.trip.displayName
+        var tripIDs: [String: [UUID]] = [:]
+        // Facts are oldest first, so walking them backwards lists each spot's trips newest first.
+        for fact in facts.reversed() {
+            let name = fact.trip.spotName
             fish[name, default: 0] += fact.fish
             trips[name, default: 0] += 1
+            tripIDs[name, default: []].append(fact.trip.id)
         }
         let ranked = trips.keys
-            .map { SpotCount(name: $0, fish: fish[$0] ?? 0, trips: trips[$0] ?? 0) }
+            .map { SpotCount(name: $0, fish: fish[$0] ?? 0, trips: trips[$0] ?? 0, tripIDs: tripIDs[$0] ?? []) }
             .sorted { lhs, rhs in
                 if lhs.fish != rhs.fish { return lhs.fish > rhs.fish }
                 if lhs.trips != rhs.trips { return lhs.trips > rhs.trips }
                 return lhs.name < rhs.name
             }
-        return Array(ranked.prefix(5))
+        return Array(ranked.prefix(StatsLimits.topListLimit))
     }
+
+    /// Trims each lure and groups them without regard to capitals. The name shown is the spelling
+    /// used on the most catches. Catches with no lure are left out.
+    fileprivate static func lures(_ catches: [StatsCatchRecord]) -> [LureCount] {
+        var tallies: [String: LureTally] = [:]
+        for fishCatch in catches {
+            let name = fishCatch.lure.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { continue }
+            let key = name.lowercased()
+            var tally = tallies[key] ?? LureTally()
+            tally.fish += fishCatch.count
+            tally.catches += 1
+            var spelling = tally.spellings[name] ?? LureSpelling(uses: 0, lastUsed: fishCatch.timestamp)
+            spelling.uses += 1
+            spelling.lastUsed = max(spelling.lastUsed, fishCatch.timestamp)
+            tally.spellings[name] = spelling
+            tallies[key] = tally
+        }
+
+        let counts = tallies.map { entry -> LureCount in
+            let key = entry.key
+            let tally = entry.value
+            let shown = tally.spellings.max { lhs, rhs in
+                if lhs.value.uses != rhs.value.uses { return lhs.value.uses < rhs.value.uses }
+                if lhs.value.lastUsed != rhs.value.lastUsed { return lhs.value.lastUsed < rhs.value.lastUsed }
+                // Reversed so the alphabetically first spelling counts as the larger one.
+                return lhs.key > rhs.key
+            }
+            return LureCount(key: key, name: shown?.key ?? key, fish: tally.fish, catches: tally.catches)
+        }
+        let ranked = counts.sorted { lhs, rhs in
+            if lhs.fish != rhs.fish { return lhs.fish > rhs.fish }
+            if lhs.catches != rhs.catches { return lhs.catches > rhs.catches }
+            return lhs.key < rhs.key
+        }
+        return Array(ranked.prefix(StatsLimits.topListLimit))
+    }
+}
+
+/// Running totals for one lure while grouping.
+private struct LureTally {
+    var fish = 0
+    var catches = 0
+    var spellings: [String: LureSpelling] = [:]
+}
+
+private struct LureSpelling {
+    var uses: Int
+    var lastUsed: Date
 }
 
 // MARK: Conditions
 // These compare fish per hour, not raw counts, because people fish longer on nice days.
 
 extension StatsCalculator {
+    /// The five condition groups in screen order, before any are hidden for having too few trips.
+    func conditionGroups(pressureUnit: PressureUnit?) -> [StatsConditionGroup] {
+        let pressure = ratesByPressureBucket(unit: pressureUnit)
+        let trend = ratesByPressureTrend()
+        let moon = ratesByMoon()
+        let weather = ratesByWeather()
+        let timeOfDay = ratesByTimeOfDay()
+        return [
+            StatsConditionGroup(title: "Pressure", rates: pressure, recordedTrips: Self.tripTotal(pressure)),
+            StatsConditionGroup(title: "Pressure trend", rates: trend, recordedTrips: Self.tripTotal(trend)),
+            StatsConditionGroup(title: "Moon", rates: moon, recordedTrips: Self.tripTotal(moon)),
+            StatsConditionGroup(title: "Weather", rates: weather, recordedTrips: Self.tripTotal(weather)),
+            // A trip can span several parts of the day, so the plain trip count is the honest total.
+            StatsConditionGroup(
+                title: "Part of the day",
+                rates: timeOfDay,
+                recordedTrips: tripCount,
+                note: "Morning 5 to 11 am, midday 11 am to 4 pm, evening 4 to 9 pm, night the rest."
+            )
+        ]
+    }
+
+    private static func tripTotal(_ rates: [ConditionRate]) -> Int {
+        rates.reduce(0) { $0 + $1.trips }
+    }
+
     /// Uses sea-level pressure. Labels are in hPa unless another unit is passed.
     func ratesByPressureBucket(unit: PressureUnit? = nil) -> [ConditionRate] {
-        return groupedRates(order: PressureBucket.allCases, label: { $0.label(unit: unit) }) { (trip: Trip) -> PressureBucket? in
+        return groupedRates(order: PressureBucket.allCases, label: { $0.label(unit: unit) }) { (trip: StatsTripRecord) -> PressureBucket? in
             guard let hPa = trip.pressureHPa else { return nil }
             return PressureBucket(hPa: hPa)
         }
     }
 
     func ratesByPressureTrend() -> [ConditionRate] {
-        return groupedRates(order: PressureTrend.allCases, label: { $0.label }) { (trip: Trip) -> PressureTrend? in
+        return groupedRates(order: PressureTrend.allCases, label: { $0.label }) { (trip: StatsTripRecord) -> PressureTrend? in
             trip.pressureTrend
         }
     }
 
     /// The eight named phases folded into New, Waxing, Full, and Waning.
     func ratesByMoon() -> [ConditionRate] {
-        return groupedRates(order: MoonGroup.allCases, label: { $0.label }) { (trip: Trip) -> MoonGroup? in
+        return groupedRates(order: MoonGroup.allCases, label: { $0.label }) { (trip: StatsTripRecord) -> MoonGroup? in
             guard let phase = trip.moonPhase else { return nil }
             return MoonGroup(phase: phase)
         }
     }
 
     func ratesByWeather() -> [ConditionRate] {
-        return groupedRates(order: WeatherCondition.allCases, label: { $0.label }) { (trip: Trip) -> WeatherCondition? in
+        return groupedRates(order: WeatherCondition.allCases, label: { $0.label }) { (trip: StatsTripRecord) -> WeatherCondition? in
             trip.weather
         }
     }
@@ -440,7 +628,7 @@ extension StatsCalculator {
     private func groupedRates<Key: Hashable>(
         order: [Key],
         label: (Key) -> String,
-        key: (Trip) -> Key?
+        key: (StatsTripRecord) -> Key?
     ) -> [ConditionRate] {
         var tripCounts: [Key: Int] = [:]
         var hours: [Key: Double] = [:]

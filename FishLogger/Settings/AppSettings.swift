@@ -80,16 +80,24 @@ enum TextSizeOption: String, CaseIterable, Identifiable {
 enum SizeEntryMode: String, CaseIterable, Identifiable {
     case category, exact
     var id: String { rawValue }
-    var label: String { self == .category ? "Size class" : "Exact measurement" }
+    /// Short enough for a segmented control at larger text sizes.
+    var label: String { self == .category ? "Size class" : "Measure" }
 }
 
 /// App preferences backed by UserDefaults. Reads go straight to UserDefaults so App Intents and
-/// the app always agree, and `access`/`withMutation` keep SwiftUI views updating.
+/// the app always agree, and `access`/`withMutation` keep SwiftUI views updating. The few list
+/// settings that views read per row keep a parsed copy, refreshed by their setters, because every
+/// write goes through this class.
 @Observable
 final class AppSettings {
     static let shared = AppSettings()
 
     @ObservationIgnored private let defaults: UserDefaults
+    /// Guards the parsed copies below. App Intents can read settings off the main thread.
+    @ObservationIgnored private let parsedLock = NSLock()
+    @ObservationIgnored private var parsedHomeRegions: Set<FishingRegion>? = nil
+    @ObservationIgnored private var parsedTargetGroups: Set<SpeciesGroup>? = nil
+    @ObservationIgnored private var parsedFavouriteIDs: [String]? = nil
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -220,8 +228,23 @@ final class AppSettings {
 
     /// Pinned species always show in the quick log grid, in this order.
     var favouriteSpeciesIDs: [String] {
-        get { access(keyPath: \.favouriteSpeciesIDs); return defaults.stringArray(forKey: Keys.favouriteSpeciesIDs) ?? [] }
-        set { withMutation(keyPath: \.favouriteSpeciesIDs) { defaults.set(newValue, forKey: Keys.favouriteSpeciesIDs) } }
+        get {
+            access(keyPath: \.favouriteSpeciesIDs)
+            parsedLock.lock()
+            defer { parsedLock.unlock() }
+            if let parsedFavouriteIDs { return parsedFavouriteIDs }
+            let parsed = defaults.stringArray(forKey: Keys.favouriteSpeciesIDs) ?? []
+            parsedFavouriteIDs = parsed
+            return parsed
+        }
+        set {
+            withMutation(keyPath: \.favouriteSpeciesIDs) {
+                defaults.set(newValue, forKey: Keys.favouriteSpeciesIDs)
+                parsedLock.lock()
+                parsedFavouriteIDs = newValue
+                parsedLock.unlock()
+            }
+        }
     }
 
     func isFavourite(_ speciesID: String) -> Bool { favouriteSpeciesIDs.contains(speciesID) }
@@ -255,12 +278,20 @@ final class AppSettings {
     var homeRegions: Set<FishingRegion> {
         get {
             access(keyPath: \.homeRegions)
+            parsedLock.lock()
+            defer { parsedLock.unlock() }
+            if let parsedHomeRegions { return parsedHomeRegions }
             let raw = defaults.stringArray(forKey: Keys.homeRegions) ?? []
-            return Set(raw.compactMap(FishingRegion.init(rawValue:)))
+            let parsed = Set(raw.compactMap(FishingRegion.init(rawValue:)))
+            parsedHomeRegions = parsed
+            return parsed
         }
         set {
             withMutation(keyPath: \.homeRegions) {
                 defaults.set(newValue.map(\.rawValue).sorted(), forKey: Keys.homeRegions)
+                parsedLock.lock()
+                parsedHomeRegions = newValue
+                parsedLock.unlock()
             }
         }
     }
@@ -269,12 +300,20 @@ final class AppSettings {
     var targetGroups: Set<SpeciesGroup> {
         get {
             access(keyPath: \.targetGroups)
+            parsedLock.lock()
+            defer { parsedLock.unlock() }
+            if let parsedTargetGroups { return parsedTargetGroups }
             let raw = defaults.stringArray(forKey: Keys.targetGroups) ?? []
-            return Set(raw.compactMap(SpeciesGroup.init(rawValue:)))
+            let parsed = Set(raw.compactMap(SpeciesGroup.init(rawValue:)))
+            parsedTargetGroups = parsed
+            return parsed
         }
         set {
             withMutation(keyPath: \.targetGroups) {
                 defaults.set(newValue.map(\.rawValue).sorted(), forKey: Keys.targetGroups)
+                parsedLock.lock()
+                parsedTargetGroups = newValue
+                parsedLock.unlock()
             }
         }
     }
@@ -284,7 +323,8 @@ final class AppSettings {
 
     /// Short summary for Settings, e.g. "Ontario" or "Ontario and 2 more".
     var homeRegionsSummary: String {
-        let names = FishingRegion.allCases.filter { homeRegions.contains($0) }.map(\.label)
+        let regions = homeRegions
+        let names = FishingRegion.allCases.filter { regions.contains($0) }.map(\.label)
         switch names.count {
         case 0: return "All of North America"
         case 1: return names[0]

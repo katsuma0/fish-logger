@@ -17,6 +17,14 @@ enum SampleData {
         return trips.filter { isSample($0) }
     }
 
+    /// How many sample trips there are. Fetches only the notes, since that is where the marker is.
+    static func sampleTripCount(in context: ModelContext) -> Int {
+        var descriptor = FetchDescriptor<Trip>()
+        descriptor.propertiesToFetch = [\.notes]
+        let trips = (try? context.fetch(descriptor)) ?? []
+        return trips.reduce(0) { $0 + (isSample($1) ? 1 : 0) }
+    }
+
     /// Builds trips directly instead of through `CatchLogger.startTrip`, which would end a real
     /// active trip and stamp the current GPS fix on every sample.
     static func addSampleTrips(in context: ModelContext, count: Int = 20, now: Date = .now) {
@@ -41,10 +49,9 @@ enum SampleData {
         CatchLogger.save(context)
     }
 
+    /// One save for the lot, so every live list redraws once instead of once per trip.
     static func deleteSampleTrips(in context: ModelContext) {
-        for trip in sampleTrips(in: context) {
-            CatchLogger.delete(trip, in: context)
-        }
+        CatchLogger.deleteAll(sampleTrips(in: context), in: context)
     }
 
     // MARK: Trip and catch builders

@@ -1,7 +1,49 @@
 import Foundation
 
 /// Flat CSV of the whole log, one row per catch, for spreadsheets and backups.
+/// Built in two steps so the slow part can leave the main thread: `records(from:)` copies plain
+/// values out of the SwiftData models on the main actor, then `csv(records:)` and
+/// `writeFile(records:on:)` turn them into a file on any thread.
 enum CSVExporter {
+    /// One trip as plain values, with its catches oldest first.
+    struct TripRecord: Sendable {
+        let startDate: Date
+        let endDate: Date?
+        let locationName: String
+        let latitude: Double?
+        let longitude: Double?
+        let waterBody: String
+        let method: String
+        let weather: String
+        let airTempC: Double?
+        let waterTempC: Double?
+        let pressureHPa: Double?
+        let pressureTrend: String
+        let windSpeedKmh: Double?
+        let windDirectionDeg: Double?
+        let moonPhase: Double?
+        let catches: [CatchRecord]
+    }
+
+    /// One catch as plain values.
+    struct CatchRecord: Sendable {
+        let timestamp: Date
+        let speciesID: String
+        let speciesName: String
+        let scientificName: String
+        let count: Int
+        let sizeClass: String
+        let lengthCm: Double?
+        let weightKg: Double?
+        let released: Bool
+        let lure: String
+        let depthM: Double?
+        let latitude: Double?
+        let longitude: Double?
+        let pressureHPa: Double?
+        let notes: String
+    }
+
     static let tripColumns = [
         "trip_start", "trip_end", "location", "trip_latitude", "trip_longitude", "water_body", "method",
         "weather", "air_temp_c", "water_temp_c", "pressure_hpa", "pressure_trend", "wind_kmh",
@@ -16,28 +58,108 @@ enum CSVExporter {
 
     static var columns: [String] { tripColumns + catchColumns }
 
-    /// Header row, then one row per catch. A trip with no catches still gets one row so skunked
-    /// days show up in the export. Rows run by trip start, then catch time.
+    // MARK: Copying out of the models
+
+    /// Trips by start date, catches by time. Only reads the models, so it is quick, but it has to
+    /// run where the models live.
+    @MainActor
+    static func records(from trips: [Trip]) -> [TripRecord] {
+        trips
+            .sorted { $0.startDate < $1.startDate }
+            .map { trip -> TripRecord in
+                let catches: [CatchRecord] = trip.catches
+                    .sorted { $0.timestamp < $1.timestamp }
+                    .map { catchRecord($0) }
+                return TripRecord(
+                    startDate: trip.startDate,
+                    endDate: trip.endDate,
+                    locationName: trip.locationName,
+                    latitude: trip.latitude,
+                    longitude: trip.longitude,
+                    waterBody: trip.waterBody.label,
+                    method: trip.method.label,
+                    weather: trip.weather?.label ?? "",
+                    airTempC: trip.airTempC,
+                    waterTempC: trip.waterTempC,
+                    pressureHPa: trip.pressureHPa,
+                    pressureTrend: trip.pressureTrend?.label ?? "",
+                    windSpeedKmh: trip.windSpeedKmh,
+                    windDirectionDeg: trip.windDirectionDeg,
+                    moonPhase: trip.moonPhase,
+                    catches: catches
+                )
+            }
+    }
+
+    @MainActor
+    private static func catchRecord(_ fishCatch: FishCatch) -> CatchRecord {
+        CatchRecord(
+            timestamp: fishCatch.timestamp,
+            speciesID: fishCatch.speciesID,
+            speciesName: fishCatch.speciesName,
+            scientificName: fishCatch.species?.scientificName ?? "",
+            count: fishCatch.count,
+            sizeClass: fishCatch.sizeClass?.label ?? "",
+            lengthCm: fishCatch.lengthCm,
+            weightKg: fishCatch.weightKg,
+            released: fishCatch.released,
+            lure: fishCatch.lure,
+            depthM: fishCatch.depthM,
+            latitude: fishCatch.latitude,
+            longitude: fishCatch.longitude,
+            pressureHPa: fishCatch.pressureHPa,
+            notes: fishCatch.notes
+        )
+    }
+
+    // MARK: Building the text
+
+    /// Same output as `csv(records:)`, straight from the models. Fine for small logs and tests;
+    /// the Settings export copies records first and builds off the main thread.
     @MainActor
     static func csv(trips: [Trip]) -> String {
+        csv(records: records(from: trips))
+    }
+
+    /// Header row, then one row per catch. A trip with no catches still gets one row so skunked
+    /// days show up in the export. Keeps the order the records are in. Safe on any thread.
+    static func csv(records: [TripRecord]) -> String {
         let dateFormatter = ISO8601DateFormatter()
         dateFormatter.timeZone = TimeZone.current
 
         var lines: [String] = [row(columns)]
-        let sortedTrips = trips.sorted { $0.startDate < $1.startDate }
-        for trip in sortedTrips {
+        lines.reserveCapacity(records.count + 1)
+        for trip in records {
             let tripPart = tripFields(trip, dateFormatter: dateFormatter)
-            let catches = trip.catches.sorted { $0.timestamp < $1.timestamp }
-            if catches.isEmpty {
+            if trip.catches.isEmpty {
                 let blanks = [String](repeating: "", count: catchColumns.count)
                 lines.append(row(tripPart + blanks))
             } else {
-                for fishCatch in catches {
+                for fishCatch in trip.catches {
                     lines.append(row(tripPart + catchFields(fishCatch, dateFormatter: dateFormatter)))
                 }
             }
         }
         return lines.joined(separator: "\r\n")
+    }
+
+    /// Builds the CSV and writes it to a temporary file named for the day, ready for the share
+    /// sheet. Safe on any thread; call it from a detached task for a big log.
+    static func writeFile(records: [TripRecord], on date: Date = .now) throws -> URL {
+        let text = csv(records: records)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(exportFileName(on: date))
+        try text.write(to: url, atomically: true, encoding: .utf8)
+        return url
+    }
+
+    /// fish-log-2026-10-31.csv. POSIX locale so the digits and calendar never change with region settings.
+    static func exportFileName(on date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = TimeZone.current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return "fish-log-\(formatter.string(from: date)).csv"
     }
 
     /// RFC 4180: quote a field only when it holds a comma, quote, CR or LF, and double inner quotes.
@@ -54,34 +176,34 @@ enum CSVExporter {
         fields.map { escape($0) }.joined(separator: ",")
     }
 
-    private static func tripFields(_ trip: Trip, dateFormatter: ISO8601DateFormatter) -> [String] {
+    private static func tripFields(_ trip: TripRecord, dateFormatter: ISO8601DateFormatter) -> [String] {
         [
             dateFormatter.string(from: trip.startDate),
             trip.endDate.map { dateFormatter.string(from: $0) } ?? "",
             trip.locationName,
             number(trip.latitude, digits: 6),
             number(trip.longitude, digits: 6),
-            trip.waterBody.label,
-            trip.method.label,
-            trip.weather?.label ?? "",
+            trip.waterBody,
+            trip.method,
+            trip.weather,
             number(trip.airTempC, digits: 1),
             number(trip.waterTempC, digits: 1),
             number(trip.pressureHPa, digits: 1),
-            trip.pressureTrend?.label ?? "",
+            trip.pressureTrend,
             number(trip.windSpeedKmh, digits: 1),
             number(trip.windDirectionDeg, digits: 0),
             number(trip.moonPhase, digits: 3)
         ]
     }
 
-    private static func catchFields(_ fishCatch: FishCatch, dateFormatter: ISO8601DateFormatter) -> [String] {
+    private static func catchFields(_ fishCatch: CatchRecord, dateFormatter: ISO8601DateFormatter) -> [String] {
         [
             dateFormatter.string(from: fishCatch.timestamp),
             fishCatch.speciesID,
             fishCatch.speciesName,
-            fishCatch.species?.scientificName ?? "",
+            fishCatch.scientificName,
             String(fishCatch.count),
-            fishCatch.sizeClass?.label ?? "",
+            fishCatch.sizeClass,
             number(fishCatch.lengthCm, digits: 1),
             number(fishCatch.weightKg, digits: 3),
             fishCatch.released ? "yes" : "no",

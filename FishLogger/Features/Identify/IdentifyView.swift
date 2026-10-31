@@ -9,8 +9,22 @@ private enum IdentifyRoute: Hashable {
     case confirm(speciesID: String, source: IdentificationSource)
 }
 
-/// Where photo ID stands for the current photo.
+/// Which engine looks at the photo.
+private enum IdentifyEngine {
+    case claude
+    case onDevice
+
+    var progressMessage: String {
+        switch self {
+        case .claude: return "Looking at the fish"
+        case .onDevice: return "Checking the photo on this phone"
+        }
+    }
+}
+
+/// Where Photo ID stands for the current photo.
 private enum IdentifyPhase {
+    /// Photo is in, nothing has run. With Claude set up, this is where the Identify button waits.
     case idle
     case running(String)
     case finished(IdentificationResult)
@@ -20,7 +34,9 @@ private enum IdentifyPhase {
 }
 
 /// Photo to species to logged catch. Presented in a sheet; owns its NavigationStack.
-/// Photos only leave the phone when a key is saved and photo ID is on, and only after one is chosen.
+/// A photo only goes to Anthropic when the person taps Identify, with photo ID on and a key saved.
+/// The on-device model, when bundled, and the checklist run on their own because nothing leaves
+/// the phone.
 struct IdentifyView: View {
     let initialImage: UIImage?
     let onLogged: ((FishCatch) -> Void)?
@@ -29,14 +45,20 @@ struct IdentifyView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
 
+    /// The original, for identifying and saving. Never drawn on screen.
     @State private var image: UIImage?
+    /// Small decoded copy for the preview and the confirm screen, made in the background.
+    @State private var displayImage: UIImage?
+    /// File data for a library photo, which saves more cheaply than the decoded image.
+    @State private var photoData: Data?
+    /// Bumped for each new photo, so late work for an older photo is dropped.
+    @State private var photoID = 0
     @State private var phase: IdentifyPhase = .idle
+    @State private var lastEngine: IdentifyEngine = .claude
+    @State private var runTask: Task<Void, Never>?
+    /// Bumped for each run, so an answer that arrives after a newer run started is ignored.
+    @State private var runID = 0
     @State private var path: [IdentifyRoute] = []
-    /// Bumped for each new photo or retry; the identification task follows it.
-    @State private var runToken = 0
-    /// The token that already has an answer, so reappearing after the camera does not resend the photo.
-    @State private var answeredToken: Int? = nil
-    @State private var preferOnDevice = false
     @State private var hasAPIKey = false
     @State private var keyChecked = false
     @State private var showingCamera = false
@@ -45,6 +67,8 @@ struct IdentifyView: View {
     @State private var photoLoadFailed = false
     @State private var showingSpeciesPicker = false
     @State private var pendingManualPickID: String? = nil
+    /// Set on the first log so a queued second tap cannot log the fish twice.
+    @State private var hasLogged = false
 
     init(initialImage: UIImage? = nil, onLogged: ((FishCatch) -> Void)? = nil) {
         self.initialImage = initialImage
@@ -55,11 +79,14 @@ struct IdentifyView: View {
     var body: some View {
         NavigationStack(path: $path) {
             rootList
-                .navigationTitle("Identify")
+                .navigationTitle("Photo ID")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel") { dismiss() }
+                        Button("Cancel") {
+                            cancelRun()
+                            dismiss()
+                        }
                     }
                 }
                 .navigationDestination(for: IdentifyRoute.self) { route in
@@ -67,11 +94,17 @@ struct IdentifyView: View {
                 }
         }
         .onAppear {
-            hasAPIKey = KeychainStore.hasValue(for: .anthropicAPIKey)
-            keyChecked = true
+            refreshKeyState()
+            // A photo handed in by the caller gets the same treatment as one taken here, once.
+            if let image, photoID == 0 {
+                photoID = 1
+                makeDisplayCopy(of: image, for: photoID)
+                startAutomaticEngines()
+            }
         }
-        .task(id: runToken) {
-            await runIdentification()
+        // Closing the sheet mid-request stops it. The camera cover also hides this view, so it is skipped then.
+        .onDisappear {
+            if !showingCamera { cancelRun() }
         }
         .onChange(of: photoItem) { _, newItem in
             guard let newItem else { return }
@@ -157,6 +190,10 @@ struct IdentifyView: View {
             }
 
             photoStatusRows
+        } footer: {
+            if keyChecked, claudeReady {
+                Text("Nothing leaves your iPhone until you tap Identify.")
+            }
         }
 
         Section {
@@ -175,12 +212,7 @@ struct IdentifyView: View {
 
     private func photoSection(_ image: UIImage) -> some View {
         Section {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFit()
-                .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
-                .frame(maxWidth: .infinity, maxHeight: 280)
-                .accessibilityLabel("Your photo")
+            photoPreview(for: image)
                 .modifier(IdentifyClearRow())
 
             HStack(spacing: 12) {
@@ -205,6 +237,29 @@ struct IdentifyView: View {
         }
     }
 
+    /// Draws only the display copy. Until it is ready, a placeholder with the photo's shape holds
+    /// the space so the buttons below do not jump.
+    @ViewBuilder
+    private func photoPreview(for image: UIImage) -> some View {
+        if let displayImage {
+            Image(uiImage: displayImage)
+                .resizable()
+                .scaledToFit()
+                .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
+                .frame(maxWidth: .infinity, maxHeight: 280)
+                .accessibilityLabel("Your photo")
+        } else {
+            let size = image.size
+            let ratio = size.height > 0 ? size.width / size.height : 1
+            RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous)
+                .fill(Color(uiColor: .tertiarySystemFill))
+                .aspectRatio(ratio, contentMode: .fit)
+                .overlay(ProgressView())
+                .frame(maxWidth: .infinity, maxHeight: 280)
+                .accessibilityLabel("Your photo, loading")
+        }
+    }
+
     @ViewBuilder
     private var photoStatusRows: some View {
         if isLoadingPhoto {
@@ -219,7 +274,9 @@ struct IdentifyView: View {
     private var statusSections: some View {
         switch phase {
         case .idle:
-            EmptyView()
+            if claudeReady {
+                identifySections
+            }
 
         case .running(let message):
             Section {
@@ -231,14 +288,15 @@ struct IdentifyView: View {
                 Label(error.message, systemImage: "exclamationmark.triangle.fill")
                     .fixedSize(horizontal: false, vertical: true)
                 actionRow("Try again", systemImage: "arrow.clockwise") {
-                    retry(onDevice: preferOnDevice)
+                    start(lastEngine)
                 }
-                if !preferOnDevice, OnDeviceIdentifier.isAvailable {
+                if lastEngine == .claude, OnDeviceIdentifier.isAvailable {
                     actionRow("Use the on-device model", systemImage: "iphone") {
-                        retry(onDevice: true)
+                        start(.onDevice)
                     }
                 }
                 checklistRow
+                pickFromListRow
             }
 
         case .finished(let result):
@@ -257,6 +315,28 @@ struct IdentifyView: View {
                 .modifier(IdentifyClearRow())
                 pickFromListRow
             }
+        }
+    }
+
+    /// The one place a photo is sent to Claude.
+    @ViewBuilder
+    private var identifySections: some View {
+        Section {
+            Button {
+                start(.claude)
+            } label: {
+                Label("Identify", systemImage: "magnifyingglass")
+            }
+            .buttonStyle(PrimaryActionButtonStyle())
+            .modifier(IdentifyClearRow())
+            .accessibilityHint("Sends this photo to Claude and suggests the species")
+        } footer: {
+            Text("Sends this photo to Anthropic. Each ID costs a few cents on your API account.")
+        }
+
+        Section {
+            checklistRow
+            pickFromListRow
         }
     }
 
@@ -286,6 +366,12 @@ struct IdentifyView: View {
         Section {
             pickFromListRow
             checklistRow
+            // Only after the on-device model answered; Claude still waits for a tap.
+            if result.source == .onDevice, claudeReady {
+                actionRow("Identify with Claude", systemImage: "magnifyingglass") {
+                    start(.claude)
+                }
+            }
         }
     }
 
@@ -341,7 +427,7 @@ struct IdentifyView: View {
         case .confirm(let speciesID, let source):
             IdentifyConfirmView(
                 species: SpeciesCatalog.species(id: speciesID) ?? SpeciesCatalog.unknown,
-                photo: image,
+                photo: displayImage,
                 source: source,
                 onLog: { sizeClass, count in
                     log(speciesID: speciesID, source: source, sizeClass: sizeClass, count: count)
@@ -367,21 +453,46 @@ struct IdentifyView: View {
         return true
     }
 
-    // MARK: Actions
-
-    private func useImage(_ newImage: UIImage) {
-        image = newImage
-        photoLoadFailed = false
-        phase = .idle
-        preferOnDevice = false
-        path.removeAll()
-        runToken += 1
+    private func refreshKeyState() {
+        hasAPIKey = KeychainStore.hasValue(for: .anthropicAPIKey)
+        keyChecked = true
     }
 
-    private func retry(onDevice: Bool) {
-        preferOnDevice = onDevice
+    // MARK: Actions
+
+    private func useImage(_ newImage: UIImage, fileData: Data? = nil, display: UIImage? = nil) {
+        cancelRun()
+        photoID += 1
+        image = newImage
+        photoData = fileData
+        displayImage = display
+        photoLoadFailed = false
         phase = .idle
-        runToken += 1
+        path.removeAll()
+        if display == nil {
+            makeDisplayCopy(of: newImage, for: photoID)
+        }
+        refreshKeyState()
+        startAutomaticEngines()
+    }
+
+    private func makeDisplayCopy(of source: UIImage, for id: Int) {
+        Task {
+            let copy = await IdentifyDisplayImage.make(from: source)
+            guard id == photoID else { return }
+            displayImage = copy
+        }
+    }
+
+    /// Only the paths that keep the photo on the phone start by themselves. With Claude set up,
+    /// the screen waits for Identify instead.
+    private func startAutomaticEngines() {
+        guard !claudeReady else { return }
+        if OnDeviceIdentifier.isAvailable {
+            start(.onDevice)
+        } else {
+            phase = .needsChecklist
+        }
     }
 
     private func loadPhoto(from item: PhotosPickerItem) {
@@ -389,15 +500,16 @@ struct IdentifyView: View {
         photoLoadFailed = false
         Task {
             let data = try? await item.loadTransferable(type: Data.self)
-            isLoadingPhoto = false
             // Cleared so picking the same photo again still counts as a change.
             photoItem = nil
-            if let data, let picked = UIImage(data: data) {
-                useImage(picked)
-            } else {
+            guard let data, let prepared = await IdentifyDisplayImage.prepare(fileData: data) else {
+                isLoadingPhoto = false
                 photoLoadFailed = true
                 Haptics.warning()
+                return
             }
+            isLoadingPhoto = false
+            useImage(prepared.full, fileData: data, display: prepared.display)
         }
     }
 
@@ -407,15 +519,28 @@ struct IdentifyView: View {
         path.append(.confirm(speciesID: speciesID, source: .manual))
     }
 
+    /// Logs right away and closes the sheet. The photo is encoded and attached in the background,
+    /// so the tap never waits on it.
     private func log(speciesID: String, source: IdentificationSource, sizeClass: SizeClass?, count: Int) {
+        guard !hasLogged else { return }
+        hasLogged = true
+        cancelRun()
+        let fileData = photoData
         let fishCatch = CatchLogger.logCatch(
             speciesID: speciesID,
             count: count,
             sizeClass: sizeClass,
-            photo: image,
+            photo: fileData == nil ? image : nil,
             identifiedBy: source,
             in: modelContext
         )
+        if let fileData {
+            // Library photos keep their file data, which ImageIO downsamples without a full decode.
+            let context = modelContext
+            Task {
+                await CatchLogger.attachPhoto(data: fileData, to: fishCatch, in: context)
+            }
+        }
         Haptics.logged()
         onLogged?(fishCatch)
         dismiss()
@@ -423,39 +548,59 @@ struct IdentifyView: View {
 
     // MARK: Identification
 
-    private func runIdentification() async {
-        guard let image, answeredToken != runToken else { return }
-        let token = runToken
-        let apiKey = KeychainStore.string(for: .anthropicAPIKey)
-        hasAPIKey = apiKey != nil
-        keyChecked = true
-
-        let outcome: IdentifyPhase?
-        if !preferOnDevice, settings.photoIDEnabled, let apiKey {
-            let model = settings.claudeModel
-            phase = .running("Looking at the fish")
-            outcome = await attempt {
-                try await ClaudeIdentifier().identify(image: image, apiKey: apiKey, model: model)
-            }
-        } else if OnDeviceIdentifier.isAvailable {
-            phase = .running("Checking the photo on this phone")
-            outcome = await attempt {
-                try await OnDeviceIdentifier.identify(image: image)
-            }
-        } else {
-            outcome = .needsChecklist
-        }
-
-        // A cancelled run leaves no answer, so it runs again when the screen comes back.
-        guard let finalPhase = outcome, !Task.isCancelled, token == runToken else { return }
-        phase = finalPhase
-        answeredToken = token
-        if case .failed = finalPhase { Haptics.warning() }
+    private func cancelRun() {
+        runTask?.cancel()
+        runTask = nil
+        runID += 1
     }
 
-    private func attempt(_ work: () async throws -> IdentificationResult) async -> IdentifyPhase? {
+    private func start(_ engine: IdentifyEngine) {
+        guard let image else { return }
+        runTask?.cancel()
+        runID += 1
+        let id = runID
+        lastEngine = engine
+
+        var apiKey = ""
+        if engine == .claude {
+            // Read fresh: the key may have been removed in Settings since this screen opened.
+            guard let saved = KeychainStore.string(for: .anthropicAPIKey), settings.photoIDEnabled else {
+                refreshKeyState()
+                let error: IdentificationError = hasAPIKey ? .photoIDDisabled : .notConfigured
+                phase = .failed(error)
+                return
+            }
+            apiKey = saved
+        }
+        let model = settings.claudeModel
+        let regions = settings.homeRegions
+        phase = .running(engine.progressMessage)
+
+        runTask = Task {
+            let outcome = await Self.identify(image, engine: engine, apiKey: apiKey, model: model, regions: regions)
+            // A cancelled or superseded run leaves the screen as the newer action set it.
+            guard let outcome, !Task.isCancelled, id == runID else { return }
+            phase = outcome
+            if case .failed = outcome { Haptics.warning() }
+        }
+    }
+
+    /// Nil when the run was cancelled.
+    private static func identify(
+        _ image: UIImage,
+        engine: IdentifyEngine,
+        apiKey: String,
+        model: String,
+        regions: Set<FishingRegion>
+    ) async -> IdentifyPhase? {
         do {
-            let result = try await work()
+            let result: IdentificationResult
+            switch engine {
+            case .claude:
+                result = try await ClaudeIdentifier().identify(image: image, apiKey: apiKey, model: model, regions: regions)
+            case .onDevice:
+                result = try await OnDeviceIdentifier.identify(image: image)
+            }
             return .finished(result)
         } catch is CancellationError {
             return nil

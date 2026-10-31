@@ -69,17 +69,14 @@ private struct SettingsDisplaySection: View {
     var body: some View {
         @Bindable var settings = settings
         Section {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Appearance")
-                Picker("Appearance", selection: $settings.appearance) {
-                    ForEach(AppearanceMode.allCases) { mode in
-                        Text(mode.label).tag(mode)
-                    }
+            // Menus rather than segmented controls: segments cannot wrap, so "Match iPhone" and
+            // "Extra large" would truncate at the larger text sizes people pick here.
+            Picker("Appearance", selection: $settings.appearance) {
+                ForEach(AppearanceMode.allCases) { mode in
+                    Text(mode.label).tag(mode)
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
             }
-            .padding(.vertical, 4)
+            .pickerStyle(.menu)
 
             Picker("Text size", selection: $settings.textSize) {
                 ForEach(TextSizeOption.allCases) { option in
@@ -88,31 +85,30 @@ private struct SettingsDisplaySection: View {
             }
             .pickerStyle(.menu)
 
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Button size")
-                Picker("Button size", selection: $settings.buttonSize) {
-                    ForEach(ButtonSize.allCases) { size in
-                        Text(size.label).tag(size)
-                    }
+            Picker("Button size", selection: $settings.buttonSize) {
+                ForEach(ButtonSize.allCases) { size in
+                    Text(size.label).tag(size)
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                SettingsSampleTile()
             }
-            .padding(.vertical, 4)
+            .pickerStyle(.menu)
+            SettingsSampleTile()
+                .padding(.vertical, 4)
 
             Toggle(isOn: $settings.highContrast) {
                 SettingsDetailLabel(
                     title: "High contrast",
-                    detail: "Thicker outlines and stronger fills. Helps in glare."
+                    detail: "Thicker outlines and stronger fills for glare. Also on when Increase Contrast is on in iPhone Settings."
                 )
             }
             Toggle("Haptics", isOn: $settings.hapticsEnabled)
             Toggle(isOn: $settings.leftHanded) {
-                SettingsDetailLabel(title: "Left-handed layout", detail: "Moves the camera button to the left.")
+                SettingsDetailLabel(title: "Left-handed layout", detail: "Puts the camera buttons on the left.")
             }
             Toggle(isOn: $settings.keepScreenOn) {
-                SettingsDetailLabel(title: "Keep screen on during trips", detail: "Uses more battery.")
+                SettingsDetailLabel(
+                    title: "Keep screen on during trips",
+                    detail: "No Face ID or passcode for every fish. Uses more battery."
+                )
             }
         } header: {
             Text("Display")
@@ -224,6 +220,7 @@ private struct SettingsUnitsSection: View {
         return "Looks like: " + parts.joined(separator: ", ") + ". Your log is stored in metric and converted for display."
     }
 
+    /// No haptic: the pickers and the example line above change right away.
     private func applyMetric() {
         settings.lengthUnit = .centimeters
         settings.weightUnit = .kilograms
@@ -231,7 +228,6 @@ private struct SettingsUnitsSection: View {
         settings.pressureUnit = .kilopascals
         settings.speedUnit = .kilometresPerHour
         settings.depthUnit = .meters
-        Haptics.tap()
     }
 
     private func applyImperial() {
@@ -241,7 +237,6 @@ private struct SettingsUnitsSection: View {
         settings.pressureUnit = .inchesOfMercury
         settings.speedUnit = .milesPerHour
         settings.depthUnit = .feet
-        Haptics.tap()
     }
 }
 
@@ -273,7 +268,7 @@ private struct SettingsLoggingSection: View {
         } header: {
             Text("Logging")
         } footer: {
-            Text("Weather comes from Open-Meteo when you have signal. Trips logged offline can be filled in later from the trip screen, up to 92 days back.")
+            Text("Weather comes from Open-Meteo when you have signal. Trips logged offline can be filled in later from the trip's page, up to 92 days back.")
         }
     }
 }
@@ -319,7 +314,7 @@ private struct SettingsResetSection: View {
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Display, units, logging, and photo ID settings go back to the defaults. Your log, favourites, and API key stay.")
+                Text("Display, units, logging, and Photo ID settings go back to the defaults. Your trips, favourites, and API key stay.")
             }
         }
     }

@@ -8,6 +8,8 @@ struct CatchEditorLocationSection: View {
     let fishCatch: FishCatch
 
     @Environment(AppSettings.self) private var settings
+    /// Grows with text size so the map keeps its share of the row, capped so it never fills the screen.
+    @ScaledMetric(relativeTo: .body) private var mapHeight: CGFloat = 160
     @State private var isLocating = false
     @State private var failureMessage: String?
 
@@ -71,7 +73,7 @@ struct CatchEditorLocationSection: View {
         ) {
             Marker(fishCatch.speciesName, coordinate: coordinate)
         }
-        .frame(height: 160)
+        .frame(height: min(mapHeight, 260))
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         // The initial position is read once, so a new spot needs a fresh map.
         .id("\(coordinate.latitude),\(coordinate.longitude)")

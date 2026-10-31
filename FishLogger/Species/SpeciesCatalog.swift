@@ -56,17 +56,38 @@ enum SpeciesCatalog {
     }
 
     /// Species caught in any of the regions, alphabetical. No regions means all of them.
+    /// Worked out once per region set and cached, because the quick log, guide, and picker all ask
+    /// on every render. Thread safe, since App Intents call in from off the main thread.
     static func available(in regions: Set<FishingRegion>) -> [Species] {
-        all.filter { $0.lives(in: regions) }.sorted { $0.commonName < $1.commonName }
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        if let cached = availableCache[regions] { return cached }
+        let result = all.filter { $0.lives(in: regions) }.sorted { $0.commonName < $1.commonName }
+        if availableCache.count >= maxCachedRegionSets { availableCache.removeAll() }
+        availableCache[regions] = result
+        return result
     }
 
-    /// Like `grouped`, limited to the regions.
+    /// Like `grouped`, limited to the regions. Cached per region set like `available(in:)`.
     static func grouped(in regions: Set<FishingRegion>) -> [(group: SpeciesGroup, species: [Species])] {
-        grouped.compactMap { entry in
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        if let cached = groupedCache[regions] { return cached }
+        let result: [(group: SpeciesGroup, species: [Species])] = grouped.compactMap { entry in
             let members = entry.species.filter { $0.lives(in: regions) }
             return members.isEmpty ? nil : (group: entry.group, species: members)
         }
+        if groupedCache.count >= maxCachedRegionSets { groupedCache.removeAll() }
+        groupedCache[regions] = result
+        return result
     }
+
+    /// Guards both caches. Never call one cached lookup from inside another while holding it.
+    private static let cacheLock = NSLock()
+    /// A person only ever has a few region sets in play; the cap just stops unbounded growth.
+    private static let maxCachedRegionSets = 16
+    nonisolated(unsafe) private static var availableCache: [Set<FishingRegion>: [Species]] = [:]
+    nonisolated(unsafe) private static var groupedCache: [Set<FishingRegion>: [(group: SpeciesGroup, species: [Species])]] = [:]
 
     /// Roughly how often North American anglers target each fish, most first. Drives the starting
     /// quick log tiles, so a new install shows fish people actually catch, not alphabetical oddities.
@@ -87,12 +108,17 @@ enum SpeciesCatalog {
     /// Best starting species for the chosen regions and kinds of fish, most popular first.
     /// Falls back to the whole region when the kinds of fish rule everything out.
     static func suggested(regions: Set<FishingRegion>, groups: Set<SpeciesGroup>, limit: Int = 12) -> [Species] {
-        let ranked = popularIDs.compactMap { species(id: $0) } +
-            all.filter { !popularIDs.contains($0.id) }.sorted { $0.commonName < $1.commonName }
-        let local = ranked.filter { $0.lives(in: regions) }
+        let local = popularityRanked.filter { $0.lives(in: regions) }
         let wanted = groups.isEmpty ? local : local.filter { groups.contains($0.group) }
         return Array((wanted.isEmpty ? local : wanted).prefix(limit))
     }
+
+    /// Every species, most popular first, then the rest alphabetically. Built once.
+    private static let popularityRanked: [Species] = {
+        let popular = Set(popularIDs)
+        return popularIDs.compactMap { species(id: $0) } +
+            all.filter { !popular.contains($0.id) }.sorted { $0.commonName < $1.commonName }
+    }()
 
     /// Species ranked by how many listed traits they have. Ties keep catalog order.
     static func matching(traits selected: Set<FishTrait>) -> [(species: Species, matches: Int)] {

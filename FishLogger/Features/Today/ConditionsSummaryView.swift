@@ -24,6 +24,13 @@ struct ConditionsSummaryView: View {
         }
     }
 
+    /// True when the view would show at least one chip. Cheap nil checks, so a card around the chips
+    /// can hide itself without building them.
+    static func hasConditions(_ trip: Trip) -> Bool {
+        trip.weather != nil || trip.airTempC != nil || trip.waterTempC != nil || trip.pressureHPa != nil
+            || trip.windSpeedKmh != nil || trip.moonPhase != nil || trip.sunrise != nil || trip.sunset != nil
+    }
+
     /// VoiceOver spells "NW" letter by letter, so wind directions get read as words.
     private static let spokenCompass: [String: String] = [
         "N": "north", "NE": "northeast", "E": "east", "SE": "southeast",

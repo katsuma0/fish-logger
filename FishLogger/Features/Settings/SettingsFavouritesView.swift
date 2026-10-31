@@ -1,11 +1,14 @@
 import SwiftUI
 
-/// Pinned species for the quick log grid. Favourites sit on top in grid order; everything else
-/// is below, grouped like the species guide, with a star to pin it.
+/// Pinned species for the quick log grid. Favourites sit on top in grid order; the fish of your
+/// regions are below, grouped like the species guide, with a star to pin them and a way to show
+/// every species.
 struct SettingsFavouritesView: View {
     @Environment(AppSettings.self) private var settings
+    @State private var showsAllRegions = false
 
     var body: some View {
+        let homeRegions = settings.homeRegions
         List {
             Section {
                 if favourites.isEmpty {
@@ -24,11 +27,28 @@ struct SettingsFavouritesView: View {
                 Text("These show first in the quick log grid, in this order. Tap Edit to reorder or remove.")
             }
 
-            ForEach(otherGroups) { group in
+            ForEach(otherGroups(regions: showsAllRegions ? [] : homeRegions)) { group in
                 Section(group.title) {
                     ForEach(group.species) { species in
                         addRow(species)
                     }
+                }
+            }
+
+            if !homeRegions.isEmpty {
+                Section {
+                    Button {
+                        // No animation: diffing dozens of rows would stutter, and the list jumps anyway.
+                        showsAllRegions.toggle()
+                    } label: {
+                        Label(
+                            showsAllRegions ? "Only show my regions" : "Show fish from other regions",
+                            systemImage: showsAllRegions ? "mappin.and.ellipse" : "globe.americas"
+                        )
+                        .frame(minHeight: settings.buttonSize.minTapSize)
+                    }
+                } footer: {
+                    Text("Your regions: \(settings.homeRegionsSummary). Change them in Settings.")
                 }
             }
         }
@@ -59,10 +79,10 @@ struct SettingsFavouritesView: View {
         }
     }
 
+    /// No haptic: the row moving up into Favourites is the feedback.
     private func addRow(_ species: Species) -> some View {
         Button {
             settings.toggleFavourite(species.id)
-            Haptics.tap()
         } label: {
             HStack(spacing: 12) {
                 SpeciesIcon(species: species, size: 32)
@@ -91,14 +111,14 @@ struct SettingsFavouritesView: View {
         settings.favouriteSpeciesIDs.compactMap { SpeciesCatalog.species(id: $0) }
     }
 
-    private var otherGroups: [FavouriteGroup] {
+    /// Groups from the catalog's per-region cache, minus what is already pinned. Empty regions
+    /// means every species.
+    private func otherGroups(regions: Set<FishingRegion>) -> [FavouriteGroup] {
         let pinned = Set(settings.favouriteSpeciesIDs)
-        return SpeciesGroup.allCases.compactMap { group -> FavouriteGroup? in
-            let members = SpeciesCatalog.all
-                .filter { $0.group == group && !pinned.contains($0.id) }
-                .sorted { $0.commonName < $1.commonName }
+        return SpeciesCatalog.grouped(in: regions).compactMap { entry -> FavouriteGroup? in
+            let members = entry.species.filter { !pinned.contains($0.id) }
             guard !members.isEmpty else { return nil }
-            return FavouriteGroup(id: group.rawValue, title: group.label, species: members)
+            return FavouriteGroup(id: entry.group.rawValue, title: entry.group.label, species: members)
         }
     }
 
@@ -112,7 +132,6 @@ struct SettingsFavouritesView: View {
         var ids = favourites.map(\.id)
         ids.remove(atOffsets: offsets)
         settings.favouriteSpeciesIDs = ids
-        Haptics.tap()
     }
 }
 

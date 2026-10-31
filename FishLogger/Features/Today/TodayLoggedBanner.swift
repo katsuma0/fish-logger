@@ -1,114 +1,204 @@
 import SwiftUI
 import UIKit
 
-/// Plain values for the logged banner, so the banner never reads a model that Undo just deleted.
+/// Plain values for the logged confirmation, so it never reads a model that Undo just deleted.
 struct TodayLoggedInfo: Equatable {
     let catchID: UUID
+    /// New for every log, so a second fish restarts the timer even when it is the same species.
+    let token: UUID
     let title: String
     let subtitle: String
     let species: Species?
+    var sizeLabel: String?
+    var hasPhoto: Bool
 }
 
-/// Confirmation after a log, with the one extra tap most fish deserve: a size.
+/// One-row confirmation after a log: species, "Walleye logged" with the trip count, then Size, Photo
+/// and Undo. It floats over the top of the screen, where the trip header is, so it never pushes the
+/// tiles down or sits where the thumb is logging the next fish.
 struct TodayLoggedBanner: View {
     let info: TodayLoggedInfo
-    @Binding var sizeClass: SizeClass?
-    let onDetails: () -> Void
+    /// True while a sheet or the camera is up, so the confirmation is still there afterwards.
+    let isPaused: Bool
+    let onSize: () -> Void
+    let onPhoto: () -> Void
     let onUndo: () -> Void
+    let onClose: () -> Void
 
     @Environment(AppSettings.self) private var settings
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
+    @Environment(\.accessibilitySwitchControlEnabled) private var switchControlEnabled
+    @ScaledMetric(relativeTo: .subheadline) private var iconSize: CGFloat = 30
+    /// Off for a moment after each log, so a quick second tap meant for a tile is not caught here.
+    @State private var acceptsTaps = false
+
+    private static let visibleSeconds: UInt64 = 6
+    private static let armDelayNanoseconds: UInt64 = 600_000_000
 
     init(
         info: TodayLoggedInfo,
-        sizeClass: Binding<SizeClass?>,
-        onDetails: @escaping () -> Void,
-        onUndo: @escaping () -> Void
+        isPaused: Bool,
+        onSize: @escaping () -> Void,
+        onPhoto: @escaping () -> Void,
+        onUndo: @escaping () -> Void,
+        onClose: @escaping () -> Void
     ) {
         self.info = info
-        self._sizeClass = sizeClass
-        self.onDetails = onDetails
+        self.isPaused = isPaused
+        self.onSize = onSize
+        self.onPhoto = onPhoto
         self.onUndo = onUndo
+        self.onClose = onClose
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .center, spacing: 10) {
-                SpeciesIcon(species: info.species, size: 34)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(info.title)
-                        .font(.headline)
-                    Text(info.subtitle)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 0)
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.title2)
-                    .foregroundStyle(Color.green)
-                    .accessibilityHidden(true)
-            }
-            .accessibilityElement(children: .combine)
+        let strong = settings.usesStrongContrast(colorSchemeContrast)
+        let stacked = dynamicTypeSize.isAccessibilitySize
+        let layout = stacked
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
 
-            SizeClassPicker(selection: $sizeClass, species: info.species)
-
-            HStack(spacing: 10) {
-                Button(action: onDetails) {
-                    Label("Details", systemImage: "square.and.pencil")
-                        .frame(maxWidth: .infinity, minHeight: settings.buttonSize.minTapSize)
-                }
-                .buttonStyle(.bordered)
-                .accessibilityHint("Opens everything for this catch")
-
-                Button(role: .destructive, action: onUndo) {
-                    Label("Undo", systemImage: "arrow.uturn.backward")
-                        .frame(maxWidth: .infinity, minHeight: settings.buttonSize.minTapSize)
-                }
-                .buttonStyle(.bordered)
-                .accessibilityHint("Removes this catch")
-            }
-            .font(.headline)
+        layout {
+            summary
+            buttons(stretch: stacked)
         }
-        .padding(14)
-        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous)
-                .fill(settings.highContrast ? AnyShapeStyle(Theme.cardBackground) : AnyShapeStyle(Material.regular))
-                .shadow(color: Color.black.opacity(0.18), radius: 12, x: 0, y: 4)
+                .fill(strong ? AnyShapeStyle(Theme.cardBackground) : AnyShapeStyle(Material.regular))
+                .shadow(color: Color.black.opacity(0.18), radius: 10, x: 0, y: 3)
         )
         .overlay(
             RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous)
-                .strokeBorder(settings.highContrast ? Color.primary : Color.clear, lineWidth: 2)
+                .strokeBorder(strong ? Color.primary : Color.clear, lineWidth: 2)
         )
+        .allowsHitTesting(acceptsTaps)
+        .accessibilityElement(children: .contain)
+        .accessibilityAction(.escape) { onClose() }
+        .task(id: info.token) {
+            await armAfterDelay()
+        }
+        .task(id: TodayBannerTimerKey(token: info.token, isPaused: isPaused, assistive: usesAssistiveTech)) {
+            await hideAfterDelay()
+        }
+    }
+
+    private var summary: some View {
+        HStack(alignment: .center, spacing: 10) {
+            SpeciesIcon(species: info.species, size: iconSize)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(info.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text(info.subtitle)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func buttons(stretch: Bool) -> some View {
+        HStack(spacing: 4) {
+            barButton(
+                title: info.sizeLabel ?? "Size",
+                systemImage: "ruler",
+                spoken: info.sizeLabel.map { "Size, \($0)" } ?? "Set size",
+                hint: "Picks the size of this fish",
+                stretch: stretch,
+                action: onSize
+            )
+            barButton(
+                title: "Photo",
+                systemImage: info.hasPhoto ? "checkmark.circle.fill" : "camera",
+                spoken: info.hasPhoto ? "Add another photo" : "Add photo",
+                hint: "Takes a photo of this fish",
+                stretch: stretch,
+                action: onPhoto
+            )
+            barButton(
+                title: "Undo",
+                systemImage: "arrow.uturn.backward",
+                role: .destructive,
+                spoken: "Undo",
+                hint: "Removes this catch",
+                stretch: stretch,
+                action: onUndo
+            )
+            if usesAssistiveTech {
+                barButton(
+                    title: "Close",
+                    systemImage: "xmark",
+                    spoken: "Close",
+                    hint: "Hides this message",
+                    stretch: stretch,
+                    action: onClose
+                )
+            }
+        }
+        .fixedSize(horizontal: !stretch, vertical: false)
+    }
+
+    private func barButton(
+        title: String,
+        systemImage: String,
+        role: ButtonRole? = nil,
+        spoken: String,
+        hint: String,
+        stretch: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(role: role, action: action) {
+            VStack(spacing: 2) {
+                Image(systemName: systemImage)
+                    .font(.body.weight(.semibold))
+                    .accessibilityHidden(true)
+                Text(title)
+                    .font(.caption2.weight(.semibold))
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, 4)
+            .frame(
+                minWidth: settings.buttonSize.minTapSize,
+                maxWidth: stretch ? .infinity : nil,
+                minHeight: settings.buttonSize.minTapSize
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel(spoken)
+        .accessibilityHint(hint)
+    }
+
+    /// VoiceOver and Switch Control users need as long as they like, so nothing hides on them.
+    private var usesAssistiveTech: Bool {
+        voiceOverEnabled || switchControlEnabled
+    }
+
+    private func armAfterDelay() async {
+        acceptsTaps = false
+        try? await Task.sleep(nanoseconds: Self.armDelayNanoseconds)
+        guard !Task.isCancelled else { return }
+        acceptsTaps = true
+    }
+
+    private func hideAfterDelay() async {
+        guard !isPaused, !usesAssistiveTech else { return }
+        guard !UIAccessibility.isVoiceOverRunning, !UIAccessibility.isSwitchControlRunning else { return }
+        try? await Task.sleep(nanoseconds: Self.visibleSeconds * 1_000_000_000)
+        guard !Task.isCancelled else { return }
+        onClose()
     }
 }
 
-/// Floating shortcut to photo ID. Sits on the thumb side the angler picked in Settings.
-struct TodayCameraButton: View {
-    let action: () -> Void
-
-    @Environment(AppSettings.self) private var settings
-
-    init(action: @escaping () -> Void) {
-        self.action = action
-    }
-
-    var body: some View {
-        let size = settings.buttonSize.primaryButtonHeight
-        Button(action: action) {
-            Image(systemName: "camera.fill")
-                .font(.title2.weight(.semibold))
-                .foregroundStyle(Color.white)
-                .frame(width: size, height: size)
-                .background(Circle().fill(Color.accentColor))
-                .overlay {
-                    Circle()
-                        .strokeBorder(settings.highContrast ? Color.primary : Color.clear, lineWidth: 2)
-                }
-                .shadow(color: Color.black.opacity(0.25), radius: 6, x: 0, y: 3)
-                .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Identify a fish from a photo")
-        .accessibilityHint("Opens the camera, or your photos when there is no camera")
-    }
+/// Restarts the hide timer for a new fish, when a sheet closes, or when VoiceOver turns on or off.
+private struct TodayBannerTimerKey: Equatable {
+    let token: UUID
+    let isPaused: Bool
+    let assistive: Bool
 }

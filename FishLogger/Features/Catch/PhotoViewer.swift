@@ -7,8 +7,12 @@ struct PhotoViewer: View {
     let photos: [CatchPhoto]
     let startIndex: Int
 
+    @Environment(AppSettings.self) private var settings
     @Environment(\.dismiss) private var dismiss
     @State private var selection: Int
+    /// JPEG bytes each page already read, by photo id. Share uses these, so swiping never reads a
+    /// photo file on the main thread just to build the share button.
+    @State private var loadedData: [UUID: Data] = [:]
 
     init(photos: [CatchPhoto], startIndex: Int) {
         self.photos = photos
@@ -29,9 +33,17 @@ struct PhotoViewer: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 TabView(selection: $selection) {
-                    ForEach(photos.indices, id: \.self) { index in
-                        CatchPhotoViewerPage(photo: photos[index], position: index + 1, total: photos.count)
-                            .tag(index)
+                    ForEach(Array(photos.enumerated()), id: \.element.id) { index, photo in
+                        let photoID = photo.id
+                        CatchPhotoViewerPage(
+                            photo: photo,
+                            position: index + 1,
+                            total: photos.count,
+                            onLoad: { data in
+                                if loadedData[photoID] == nil { loadedData[photoID] = data }
+                            }
+                        )
+                        .tag(index)
                     }
                 }
                 .tabViewStyle(.page(indexDisplayMode: indexDisplayMode))
@@ -54,13 +66,21 @@ struct PhotoViewer: View {
     private var controls: some View {
         HStack(spacing: 12) {
             if let photo = currentPhoto {
-                ShareLink(
-                    item: CatchPhotoShareItem(data: photo.imageData),
-                    preview: SharePreview("Catch photo", image: previewImage(for: photo))
-                ) {
+                let photoID = photo.id
+                if let data = loadedData[photoID] {
+                    ShareLink(
+                        item: CatchPhotoShareItem(data: data),
+                        preview: SharePreview("Catch photo", image: previewImage(for: photoID))
+                    ) {
+                        controlIcon("square.and.arrow.up.circle.fill")
+                    }
+                    .accessibilityLabel("Share photo")
+                } else {
+                    // Holds the spot until the page has read its photo, so Close never jumps.
                     controlIcon("square.and.arrow.up.circle.fill")
+                        .opacity(0.4)
+                        .accessibilityHidden(true)
                 }
-                .accessibilityLabel("Share photo")
             }
 
             Button {
@@ -78,25 +98,30 @@ struct PhotoViewer: View {
             .font(.title)
             .symbolRenderingMode(.palette)
             .foregroundStyle(Color.white, Color.black.opacity(0.5))
-            .frame(minWidth: 44, minHeight: 44)
+            .frame(minWidth: settings.buttonSize.minTapSize, minHeight: settings.buttonSize.minTapSize)
             .contentShape(Rectangle())
     }
 
-    private func previewImage(for photo: CatchPhoto) -> Image {
-        if let thumbnail = photo.thumbnailImage {
+    /// Cached thumbnail only. Decoding here would run on every swipe.
+    private func previewImage(for photoID: UUID) -> Image {
+        if let thumbnail = CatchPhotoThumbnailCache.cachedImage(for: photoID) {
             return Image(uiImage: thumbnail)
         }
         return Image(systemName: "photo")
     }
 }
 
-/// One page. Decodes its photo once and keeps it, so pinching does not decode on every frame.
+/// One page. Reads its photo once, decodes it off the main thread, and keeps it, so pinching and
+/// swiping never decode on the main thread.
 private struct CatchPhotoViewerPage: View {
     let photo: CatchPhoto
     let position: Int
     let total: Int
+    /// Hands the bytes to the viewer for sharing.
+    let onLoad: (Data) -> Void
 
     @State private var image: UIImage?
+    @State private var data: Data?
     @State private var didFail = false
     @State private var scale: CGFloat = 1
     @State private var settledScale: CGFloat = 1
@@ -122,16 +147,33 @@ private struct CatchPhotoViewerPage: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .task(id: photo.id) {
-            guard image == nil else { return }
-            let decoded = photo.fullImage
-            image = decoded
-            didFail = decoded == nil
-        }
+        .task(id: photo.id) { await load() }
         .onDisappear {
             scale = 1
             settledScale = 1
         }
+    }
+
+    private func load() async {
+        if let data, image != nil || didFail {
+            // Already read; the viewer may have been rebuilt, so hand the bytes over again.
+            onLoad(data)
+            return
+        }
+        // A photo deleted while the viewer was open must not be read.
+        guard !photo.isDeleted, photo.modelContext != nil else {
+            didFail = true
+            return
+        }
+        let bytes = data ?? photo.imageData
+        data = bytes
+        onLoad(bytes)
+        let decoded = await Task.detached(priority: .userInitiated) {
+            UIImage(data: bytes)?.preparingForDisplay()
+        }.value
+        guard !Task.isCancelled else { return }
+        image = decoded
+        didFail = decoded == nil
     }
 
     private var spokenLabel: String {
@@ -139,9 +181,9 @@ private struct CatchPhotoViewerPage: View {
     }
 
     private var zoomGesture: some Gesture {
-        MagnificationGesture()
+        MagnifyGesture()
             .onChanged { value in
-                scale = min(max(settledScale * value, 1), 4)
+                scale = min(max(settledScale * value.magnification, 1), 4)
             }
             .onEnded { _ in
                 settledScale = scale

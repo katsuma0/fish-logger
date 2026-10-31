@@ -204,7 +204,7 @@ enum IdentificationSource: String, CaseIterable, Codable, Identifiable {
     var label: String {
         switch self {
         case .manual: "Picked by hand"
-        case .claude: "Claude photo ID"
+        case .claude: "Photo ID"
         case .onDevice: "On-device model"
         case .traitKey: "Feature checklist"
         }

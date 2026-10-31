@@ -1,48 +1,80 @@
 import Charts
 import SwiftUI
 
-/// Horizontal bars, one per species, in the species colour.
+/// Fish per species, most first, as rows with a bar under each name in the species colour.
+/// Rows rather than a bar chart so long names wrap at any text size, and each row is a button
+/// that narrows the whole screen to that species.
 struct StatsSpeciesChart: View {
     let items: [StatsCalculator.SpeciesCount]
+    let onSelect: (String) -> Void
 
-    @Environment(AppSettings.self) private var settings
-
-    init(items: [StatsCalculator.SpeciesCount]) {
+    init(items: [StatsCalculator.SpeciesCount], onSelect: @escaping (String) -> Void = { _ in }) {
         self.items = items
+        self.onSelect = onSelect
     }
 
     var body: some View {
-        let maxCount = items.map(\.count).max() ?? 0
-        let upperBound = maxCount + max(1, maxCount / 4)
-        let rowHeight: CGFloat = 32
-        let height = (CGFloat(max(1, items.count)) * rowHeight + 28) * settings.buttonSize.scale
+        let maxCount = max(1, items.map(\.count).max() ?? 1)
 
-        StatsSectionCard("By species") {
-            Chart(items) { item in
-                BarMark(
-                    x: .value("Fish", item.count),
-                    y: .value("Species", item.name)
-                )
-                .foregroundStyle(item.statsTint)
-                .annotation(position: .trailing) {
-                    Text("\(item.count)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+        StatsSectionCard("By species", footer: "Tap a species to see only its stats.") {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(items) { item in
+                    if item.id != items.first?.id {
+                        Divider()
+                    }
+                    Button {
+                        onSelect(item.speciesID)
+                    } label: {
+                        StatsSpeciesRow(item: item, fraction: CGFloat(item.count) / CGFloat(maxCount))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(item.name)
+                    .accessibilityValue(StatsFormat.fish(item.count))
+                    .accessibilityHint("Shows only \(item.name).")
                 }
-                .accessibilityLabel(item.name)
-                .accessibilityValue(StatsFormat.fish(item.count))
             }
-            .chartXScale(domain: 0...upperBound)
-            .frame(height: height)
-            .accessibilityLabel("Fish by species")
-            .accessibilityValue(summary)
         }
     }
+}
 
-    private var summary: String {
-        items.prefix(5)
-            .map { "\($0.name) \($0.count)" }
-            .joined(separator: ", ")
+private struct StatsSpeciesRow: View {
+    let item: StatsCalculator.SpeciesCount
+    /// This species' count over the top count, 0 to 1.
+    let fraction: CGFloat
+
+    @Environment(AppSettings.self) private var settings
+    @ScaledMetric(relativeTo: .caption) private var barHeight: CGFloat = 8
+
+    init(item: StatsCalculator.SpeciesCount, fraction: CGFloat) {
+        self.item = item
+        self.fraction = fraction
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            SpeciesIcon(species: item.species, size: settings.buttonSize.iconSize)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(item.name)
+                        .font(.body)
+                        .foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 8)
+                    Text("\(item.count)")
+                        .font(.body.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                GeometryReader { proxy in
+                    Capsule()
+                        .fill(item.statsTint)
+                        .frame(width: max(barHeight, proxy.size.width * fraction), height: barHeight)
+                }
+                .frame(height: barHeight)
+            }
+        }
+        .padding(.vertical, 8)
+        .frame(minHeight: settings.buttonSize.minTapSize)
+        .contentShape(Rectangle())
     }
 }
 
@@ -50,7 +82,8 @@ struct StatsSpeciesChart: View {
 struct StatsHourChart: View {
     let items: [StatsCalculator.HourCount]
 
-    @Environment(AppSettings.self) private var settings
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .caption) private var chartHeight: CGFloat = 180
 
     init(items: [StatsCalculator.HourCount]) {
         self.items = items
@@ -67,12 +100,20 @@ struct StatsHourChart: View {
                 .accessibilityValue(StatsFormat.fish(item.count))
             }
             .chartXAxis {
-                AxisMarks(values: ["12a", "3a", "6a", "9a", "12p", "3p", "6p", "9p"])
+                AxisMarks(values: axisHours)
             }
-            .frame(height: 180 * settings.buttonSize.scale)
+            .frame(height: min(chartHeight, StatsLayout.maxChartHeight))
             .accessibilityLabel("Fish by hour of day")
             .accessibilityValue(summary)
         }
+    }
+
+    /// Fewer labels at accessibility sizes, so the bigger text does not run together.
+    private var axisHours: [String] {
+        if dynamicTypeSize.isAccessibilitySize {
+            return ["12a", "6a", "12p", "6p"]
+        }
+        return ["12a", "3a", "6a", "9a", "12p", "3p", "6p", "9p"]
     }
 
     /// Names the busiest hours so VoiceOver users get the point without stepping through 24 bars.
@@ -90,7 +131,7 @@ struct StatsHourChart: View {
 struct StatsMonthChart: View {
     let items: [StatsCalculator.MonthCount]
 
-    @Environment(AppSettings.self) private var settings
+    @ScaledMetric(relativeTo: .caption) private var chartHeight: CGFloat = 180
 
     init(items: [StatsCalculator.MonthCount]) {
         self.items = items
@@ -106,7 +147,7 @@ struct StatsMonthChart: View {
                 .accessibilityLabel(item.month.formatted(.dateTime.month(.wide).year()))
                 .accessibilityValue("\(StatsFormat.fish(item.count)), \(StatsFormat.trips(item.trips))")
             }
-            .frame(height: 180 * settings.buttonSize.scale)
+            .frame(height: min(chartHeight, StatsLayout.maxChartHeight))
             .accessibilityLabel("Fish by month")
             .accessibilityValue(summary)
         }
@@ -122,7 +163,8 @@ struct StatsMonthChart: View {
 struct StatsSizeChart: View {
     let items: [StatsCalculator.SizeClassCount]
 
-    @Environment(AppSettings.self) private var settings
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .caption) private var chartHeight: CGFloat = 180
 
     init(items: [StatsCalculator.SizeClassCount]) {
         self.items = items
@@ -132,7 +174,17 @@ struct StatsSizeChart: View {
         let hasSizes = items.contains { $0.count > 0 }
 
         StatsSectionCard("Size classes", footer: "Measured fish are sorted into a class from their length.") {
-            if hasSizes {
+            if !hasSizes {
+                Text("No sizes logged in this range. Pick a size class when you log a fish to fill this in.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if dynamicTypeSize.isAccessibilitySize {
+                // Five labels under five bars do not fit at these sizes, so read it as a list.
+                StatsValueRows(rows: items.map {
+                    StatsValueRows.Row(label: $0.sizeClass.label, value: StatsFormat.fish($0.count))
+                })
+            } else {
                 Chart(items) { item in
                     BarMark(
                         x: .value("Size", item.sizeClass.label),
@@ -141,14 +193,9 @@ struct StatsSizeChart: View {
                     .accessibilityLabel(item.sizeClass.label)
                     .accessibilityValue(StatsFormat.fish(item.count))
                 }
-                .frame(height: 180 * settings.buttonSize.scale)
+                .frame(height: min(chartHeight, StatsLayout.maxChartHeight))
                 .accessibilityLabel("Fish by size class")
                 .accessibilityValue(summary)
-            } else {
-                Text("No sizes logged in this range. Pick a size class when you log a fish to fill this in.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }

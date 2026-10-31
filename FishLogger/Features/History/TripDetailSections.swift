@@ -15,7 +15,8 @@ struct HistoryTripHeader: View {
             Text(trip.startDate.formatted(date: .complete, time: .omitted))
                 .font(.headline)
 
-            HStack(spacing: 8) {
+            // Wraps instead of squeezing at the largest text sizes.
+            FlowLayout(spacing: 8, lineSpacing: 4) {
                 Text(trip.historyTimeRange)
                 if trip.isActive {
                     HistoryFishingNowBadge()
@@ -71,12 +72,14 @@ struct HistorySpeciesChip: View {
     let entry: HistorySpeciesCount
 
     @Environment(AppSettings.self) private var settings
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
     init(entry: HistorySpeciesCount) {
         self.entry = entry
     }
 
     var body: some View {
+        let strong = settings.usesStrongContrast(colorSchemeContrast)
         HStack(spacing: 6) {
             SpeciesIcon(species: entry.species, size: 20)
             Text("\(entry.name) \(entry.count)")
@@ -88,10 +91,7 @@ struct HistorySpeciesChip: View {
         .padding(.vertical, 5)
         .background(Capsule().fill(Color(uiColor: .tertiarySystemFill)))
         .overlay(
-            Capsule().strokeBorder(
-                settings.highContrast ? Color.primary : Color.clear,
-                lineWidth: settings.highContrast ? 1.5 : 0
-            )
+            Capsule().strokeBorder(strong ? Color.primary : Color.clear, lineWidth: strong ? 1.5 : 0)
         )
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(spokenLabel)

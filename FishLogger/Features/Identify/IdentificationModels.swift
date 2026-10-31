@@ -39,7 +39,7 @@ struct IdentificationResult: Equatable {
     var best: IdentificationCandidate? { candidates.first }
 }
 
-/// Every way photo ID can fail, with a message fit to show as is. Most point at the checklist,
+/// Every way Photo ID can fail, with a message fit to show as is. Most point at the checklist,
 /// because it works with no network and no key.
 enum IdentificationError: LocalizedError, Equatable {
     case notConfigured
@@ -58,7 +58,7 @@ enum IdentificationError: LocalizedError, Equatable {
     var message: String {
         switch self {
         case .notConfigured:
-            return "Add an Anthropic API key in Settings to identify from photos. The checklist works offline."
+            return "To use Photo ID, add an Anthropic API key in Settings under Photo ID. The checklist works offline."
         case .photoIDDisabled:
             return "Photo ID is turned off in Settings. The checklist works offline."
         case .invalidAPIKey:
@@ -68,7 +68,7 @@ enum IdentificationError: LocalizedError, Equatable {
         case .busy:
             return "Claude is busy. Try again shortly, or use the checklist."
         case .offline:
-            return "No connection, so photo ID cannot run. The checklist works offline."
+            return "No connection, so Photo ID cannot run. The checklist works offline."
         case .refused:
             return "Claude would not identify this photo. Try another photo, or use the checklist."
         case .api(_, let message):

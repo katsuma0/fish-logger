@@ -70,7 +70,7 @@ struct HistoryTripList: View {
         // Clear the request first so nothing reads the trip after it is gone.
         pendingDelete = nil
         CatchLogger.delete(trip, in: modelContext)
-        Haptics.tap()
+        Haptics.warning()
     }
 }
 

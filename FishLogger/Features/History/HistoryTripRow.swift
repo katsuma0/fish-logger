@@ -1,11 +1,13 @@
 import SwiftData
 import SwiftUI
 
-/// One trip in the Log list: where, when, how long, and what came in.
+/// One trip in the Trips list: where, when, how long, and what came in.
 struct HistoryTripRow: View {
     let trip: Trip
 
     @Environment(AppSettings.self) private var settings
+    /// Grows with the text so the species icons stay in step with their counts.
+    @ScaledMetric(relativeTo: .caption) private var iconSize: CGFloat = 22
 
     private static let maxIcons = 5
 
@@ -28,7 +30,8 @@ struct HistoryTripRow: View {
                 }
             }
 
-            HStack(spacing: 8) {
+            // Wraps instead of squeezing at the largest text sizes.
+            FlowLayout(spacing: 8, lineSpacing: 4) {
                 Text(trip.historyTimeRange)
                 if trip.isActive {
                     HistoryFishingNowBadge()
@@ -37,7 +40,7 @@ struct HistoryTripRow: View {
             .font(.subheadline)
             .foregroundStyle(.secondary)
 
-            HStack(spacing: 14) {
+            FlowLayout(spacing: 14, lineSpacing: 4) {
                 durationLabel
                 Label(HistoryText.fish(trip.totalFish), systemImage: "fish")
             }
@@ -45,10 +48,10 @@ struct HistoryTripRow: View {
             .foregroundStyle(.secondary)
 
             if !tally.isEmpty {
-                HStack(spacing: 10) {
+                FlowLayout(spacing: 10, lineSpacing: 6) {
                     ForEach(Array(tally.prefix(Self.maxIcons))) { entry in
                         HStack(spacing: 3) {
-                            SpeciesIcon(species: entry.species, size: 22)
+                            SpeciesIcon(species: entry.species, size: min(iconSize, 40))
                             Text("\(entry.count)")
                                 .font(.caption.weight(.semibold))
                                 .monospacedDigit()
@@ -100,24 +103,25 @@ struct HistoryTripRow: View {
     }
 }
 
-/// Green capsule shown on a trip that has not ended.
+/// Green capsule shown on a trip that has not ended. Black text on the system green clears 4.5:1 in
+/// light and dark mode, and on the darker green the system uses when Increase Contrast is on. White
+/// text on green did not.
 struct HistoryFishingNowBadge: View {
     @Environment(AppSettings.self) private var settings
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
     init() {}
 
     var body: some View {
+        let strong = settings.usesStrongContrast(colorSchemeContrast)
         Text("Fishing now")
             .font(.caption.weight(.bold))
-            .foregroundStyle(Color.white)
+            .foregroundStyle(Color.black)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
-            .background(Capsule().fill(Color.green))
+            .background(Capsule().fill(Color(uiColor: .systemGreen)))
             .overlay(
-                Capsule().strokeBorder(
-                    settings.highContrast ? Color.primary : Color.clear,
-                    lineWidth: settings.highContrast ? 1.5 : 0
-                )
+                Capsule().strokeBorder(strong ? Color.primary : Color.clear, lineWidth: strong ? 1.5 : 0)
             )
             .fixedSize()
     }

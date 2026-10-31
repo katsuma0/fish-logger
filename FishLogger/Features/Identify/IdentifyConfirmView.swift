@@ -3,7 +3,8 @@ import UIKit
 
 /// Last step before logging: check the species, optionally pick a size and count, then log.
 /// Pushed inside IdentifyView's NavigationStack. Logging itself happens in IdentifyView so it can
-/// dismiss the whole sheet.
+/// dismiss the whole sheet. `photo` should be the small display copy, not the camera original,
+/// so pushing this screen never decodes a 12 MP image on the main thread.
 struct IdentifyConfirmView: View {
     let species: Species
     let photo: UIImage?
@@ -13,6 +14,8 @@ struct IdentifyConfirmView: View {
     @Environment(AppSettings.self) private var settings
     @State private var sizeClass: SizeClass? = nil
     @State private var count = 1
+    /// Set on the first tap so a second, wet-handed tap cannot log the fish twice.
+    @State private var hasLogged = false
 
     init(species: Species, photo: UIImage?, source: IdentificationSource, onLog: @escaping (SizeClass?, Int) -> Void) {
         self.species = species
@@ -65,10 +68,13 @@ struct IdentifyConfirmView: View {
 
             Section {
                 Button {
+                    guard !hasLogged else { return }
+                    hasLogged = true
                     onLog(sizeClass, count)
                 } label: {
                     Label(logTitle, systemImage: "checkmark.circle.fill")
                 }
+                // Guarded above rather than disabled, so the button does not flash grey as the sheet closes.
                 .buttonStyle(PrimaryActionButtonStyle(tint: isUnknown ? Color.gray : species.color))
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)

@@ -15,12 +15,3 @@ extension FishCatch {
 
     var catchEditorIsGone: Bool { catchEditorLiveContext == nil }
 }
-
-enum CatchEditorQueries {
-    /// Recent catches for lure suggestions. Capped so a long history does not load on every keystroke.
-    static var recentCatches: FetchDescriptor<FishCatch> {
-        var descriptor = FetchDescriptor<FishCatch>(sortBy: [SortDescriptor(\.timestamp, order: .reverse)])
-        descriptor.fetchLimit = 300
-        return descriptor
-    }
-}

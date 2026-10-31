@@ -1,15 +1,18 @@
+import PhotosUI
 import SwiftData
 import SwiftUI
 import UIKit
 
 /// Everything a sheet on the Today screen can show. One `.sheet(item:)` keeps presentations from
-/// fighting each other when a tile, the banner, and the trip list all want to open something.
+/// fighting each other when a tile, the logged confirmation, and the trip list all want to open something.
 enum TodaySheet: Identifiable {
     case startTrip
     case editTrip(Trip)
     case editCatch(FishCatch)
+    case setSize(FishCatch)
     case pickSpecies
-    case identify(UIImage?)
+    case identify
+    case lastTrip(Trip)
 
     var id: String {
         switch self {
@@ -19,56 +22,79 @@ enum TodaySheet: Identifiable {
             return "editTrip-\(trip.id.uuidString)"
         case .editCatch(let fishCatch):
             return "editCatch-\(fishCatch.id.uuidString)"
+        case .setSize(let fishCatch):
+            return "setSize-\(fishCatch.id.uuidString)"
         case .pickSpecies:
             return "pickSpecies"
-        case .identify(let image):
-            return image == nil ? "identify" : "identify-photo"
+        case .identify:
+            return "identify"
+        case .lastTrip(let trip):
+            return "lastTrip-\(trip.id.uuidString)"
         }
     }
 }
 
-/// The on-the-water screen. One tap logs a fish, so everything else stays out of the way.
+/// What the tile order depends on. A change re-checks the grid; a running trip only ever grows it.
+private struct TodayGridKey: Equatable {
+    let tripID: UUID?
+    let catchCount: Int
+    let favourites: [String]
+    let regions: Set<FishingRegion>
+    let groups: Set<SpeciesGroup>
+    let mostLogged: [String]?
+}
+
+/// The idle card's text and the trip it opens, fetched once rather than worked out on every render.
+private struct TodayIdleInfo {
+    var summary = " "
+    var lastTrip: Trip?
+}
+
+/// The on-the-water screen. One tap logs a fish, and nothing moves the tiles while a trip runs.
 struct TodayView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(\.modelContext) private var modelContext
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Query(sort: \Trip.startDate, order: .reverse) private var trips: [Trip]
+    @Environment(\.scenePhase) private var scenePhase
+    @Query(filter: #Predicate<Trip> { $0.endDate == nil }, sort: \Trip.startDate, order: .reverse)
+    private var openTrips: [Trip]
 
     @State private var activeSheet: TodaySheet?
-    @State private var showingCamera = false
-    @State private var capturedImage: UIImage?
     @State private var showingEndConfirmation = false
-    @State private var bannerInfo: TodayLoggedInfo?
-    @State private var bannerCatch: FishCatch?
-    @State private var bannerSizeClass: SizeClass?
-    @State private var bannerToken = UUID()
-    @State private var mostLoggedIDs: [String] = []
+    @State private var logged: TodayLoggedInfo?
+    @State private var loggedCatch: FishCatch?
+    @State private var photoTarget: FishCatch?
+    @State private var showingCamera = false
+    @State private var showingPhotoPicker = false
+    @State private var pickedPhoto: PhotosPickerItem?
+    @State private var tileOrder = TodayTileOrder.load()
+    /// Nil until the first fetch, so the grid keeps its last order instead of shuffling as it loads.
+    @State private var mostLoggedIDs: [String]?
+    @State private var idle = TodayIdleInfo()
+    @State private var staleTripID: UUID?
     @State private var refreshedTripIDs: Set<UUID> = []
     @State private var isFetchingWeather = false
+    /// Keep going on the stale trip card, remembered so the question does not come straight back.
+    @AppStorage("todayKeptGoingTripID") private var keptGoingTripID = ""
+    @AppStorage("todayKeptGoingAt") private var keptGoingAt: Double = 0
 
-    private static let maxSpeciesTiles = 12
-    private static let bannerSeconds: UInt64 = 8
-
-    private var activeTrip: Trip? { trips.first { $0.endDate == nil } }
+    private var activeTrip: Trip? { openTrips.first }
 
     var body: some View {
+        let trip = activeTrip
+        let counts = Self.counts(for: trip)
+
         NavigationStack {
             ScrollView {
-                scrollContent
+                scrollContent(trip: trip, counts: counts)
             }
             .background(Theme.screenBackground)
+            .overlay(alignment: .top) {
+                loggedOverlay
+            }
             .navigationTitle("Today")
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    if activeTrip != nil {
-                        Button("End trip") {
-                            showingEndConfirmation = true
-                        }
-                    }
-                }
-            }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                bottomBar
+                toolbarContent(hasTrip: trip != nil)
             }
             .confirmationDialog("End this trip?", isPresented: $showingEndConfirmation, titleVisibility: .visible) {
                 Button("End trip") { endActiveTrip() }
@@ -77,47 +103,53 @@ struct TodayView: View {
                 Text(endTripMessage)
             }
         }
-        .onAppear {
-            LocationService.shared.requestPermission()
-            mostLoggedIDs = CatchLogger.mostLoggedSpeciesIDs(in: modelContext, limit: Self.maxSpeciesTiles)
+        .onChange(of: gridKey(for: trip), initial: true) {
+            refreshTiles()
         }
-        .onChange(of: activeTrip?.id.uuidString, initial: true) {
-            refreshActiveTripIfNeeded()
+        .onChange(of: trip?.id, initial: true) {
+            activeTripChanged()
         }
-        .task(id: bannerToken) {
-            await autoHideBanner()
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { checkStaleTrip() }
         }
-        .sheet(item: $activeSheet, onDismiss: { validateBanner() }) { sheet in
+        .task {
+            await screenAppeared()
+        }
+        .sheet(item: $activeSheet, onDismiss: { sheetDismissed() }) { sheet in
             sheetContent(for: sheet)
                 .environment(settings)
         }
-        .fullScreenCover(isPresented: $showingCamera, onDismiss: { presentCapturedPhoto() }) {
+        .fullScreenCover(isPresented: $showingCamera) {
             CameraPicker(onCapture: { image in
-                capturedImage = image
-                showingCamera = false
+                attachPhoto(image)
             })
             .ignoresSafeArea()
+        }
+        .photosPicker(isPresented: $showingPhotoPicker, selection: $pickedPhoto, matching: .images)
+        .onChange(of: pickedPhoto) { _, item in
+            guard let item else { return }
+            pickedPhoto = nil
+            attachPickedPhoto(item)
         }
     }
 
     // MARK: Sections
 
-    private var scrollContent: some View {
+    private func scrollContent(trip: Trip?, counts: [String: Int]) -> some View {
         VStack(alignment: .leading, spacing: 20) {
-            if let trip = activeTrip {
-                TodayTripHeader(
+            statusSection(trip: trip, counts: counts)
+
+            quickLogSection(trip: trip, counts: counts)
+
+            if let trip {
+                TodayConditionsCard(
                     trip: trip,
                     isFetchingWeather: isFetchingWeather,
-                    onEdit: { activeSheet = .editTrip(trip) },
                     onGetWeather: { fetchWeather(for: trip) }
                 )
-            } else {
-                idleSection
             }
 
-            quickLogSection
-
-            if let trip = activeTrip, !trip.catches.isEmpty {
+            if let trip, !trip.catches.isEmpty {
                 TodayCatchList(
                     catches: trip.sortedCatches,
                     onOpen: { fishCatch in activeSheet = .editCatch(fishCatch) },
@@ -130,9 +162,35 @@ struct TodayView: View {
         .padding(.vertical, 12)
     }
 
+    /// The trip header, the stale trip question, or the idle card. All three sit in the same slot at
+    /// about the same height, so the grid below barely moves when one replaces another.
+    @ViewBuilder
+    private func statusSection(trip: Trip?, counts: [String: Int]) -> some View {
+        if let trip {
+            if staleTripID == trip.id {
+                TodayStaleTripCard(
+                    trip: trip,
+                    onEnd: { endStaleTrip(trip) },
+                    onKeepGoing: { keepGoing(trip) }
+                )
+            } else {
+                TodayTripHeader(
+                    trip: trip,
+                    speciesCount: counts.keys.filter { $0 != SpeciesCatalog.unknownID }.count,
+                    onEdit: { activeSheet = .editTrip(trip) }
+                )
+            }
+        } else {
+            idleSection
+        }
+    }
+
     private var idleSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            TodayIdleCard(trips: trips)
+            TodayIdleCard(
+                summary: idle.summary,
+                onOpenLastTrip: openLastTrip
+            )
             Button {
                 activeSheet = .startTrip
             } label: {
@@ -143,59 +201,79 @@ struct TodayView: View {
         }
     }
 
-    private var quickLogSection: some View {
-        let trip = activeTrip
-        return VStack(alignment: .leading, spacing: 10) {
-            Text("Log a fish")
-                .font(.headline)
-                .accessibilityAddTraits(.isHeader)
-            if trip == nil {
-                Text("Tap a fish to log it. A trip starts on its own.")
+    private var openLastTrip: (() -> Void)? {
+        guard let last = idle.lastTrip else { return nil }
+        return { activeSheet = .lastTrip(last) }
+    }
+
+    private func quickLogSection(trip: Trip?, counts: [String: Int]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Log a fish")
+                    .font(.headline)
+                    .accessibilityAddTraits(.isHeader)
+                // Same length either way, so the grid does not shift when the first fish starts a trip.
+                Text(trip == nil ? "Tap a fish to log it. A trip starts on its own." : "Tap a fish to log it. Press and hold for more.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                    .accessibilityHidden(trip != nil)
             }
             TodayQuickLogGrid(
-                species: quickLogSpecies(for: trip),
-                counts: tripCounts(for: trip),
+                species: tileOrder.speciesIDs.compactMap { SpeciesCatalog.species(id: $0) },
+                counts: counts,
                 onLog: { species, count in log(species, count: count) },
                 onLogWithDetails: { species in log(species, openDetails: true) },
                 onOtherFish: { activeSheet = .pickSpecies },
-                onPhotoID: { startPhotoID() }
+                onPhotoID: { openPhotoID() }
             )
         }
     }
 
-    private var bottomBar: some View {
-        VStack(alignment: settings.leftHanded ? HorizontalAlignment.leading : HorizontalAlignment.trailing, spacing: 10) {
-            TodayCameraButton(action: { startPhotoID() })
-                .contextMenu {
-                    Button {
-                        activeSheet = .identify(nil)
-                    } label: {
-                        Label("Choose from photos", systemImage: "photo.on.rectangle")
-                    }
-                }
-                .accessibilityAction(named: Text("Choose from photos")) { activeSheet = .identify(nil) }
-            if let info = bannerInfo {
+    /// Floats under the navigation bar, over the trip header, so it never covers the tiles.
+    private var loggedOverlay: some View {
+        ZStack(alignment: .top) {
+            if let info = logged {
                 TodayLoggedBanner(
                     info: info,
-                    sizeClass: bannerSizeClassBinding,
-                    onDetails: { openBannerDetails() },
-                    onUndo: { undoLastLog() }
+                    isPaused: activeSheet != nil || showingCamera || showingPhotoPicker,
+                    onSize: { openSize() },
+                    onPhoto: { openPhoto() },
+                    onUndo: { undoLastLog() },
+                    onClose: { hideLogged() }
                 )
-                .transition(bannerTransition)
+                .padding(.horizontal, 12)
+                .padding(.top, 4)
+                .transition(loggedTransition)
             }
         }
-        .frame(maxWidth: .infinity, alignment: settings.leftHanded ? Alignment.leading : Alignment.trailing)
-        .padding(.horizontal, 16)
-        .padding(.bottom, 8)
+        .animation(reduceMotion ? Animation.easeInOut(duration: 0.2) : Animation.easeOut(duration: 0.25), value: logged?.token)
+    }
+
+    @ToolbarContentBuilder
+    private func toolbarContent(hasTrip: Bool) -> some ToolbarContent {
+        // On the thumb side, like the rest of the left-handed layout.
+        ToolbarItem(placement: settings.leftHanded ? ToolbarItemPlacement.topBarLeading : ToolbarItemPlacement.topBarTrailing) {
+            Button {
+                openPhotoID()
+            } label: {
+                Label("Photo ID", systemImage: "camera")
+            }
+            .accessibilityHint("Take or pick a photo and get a species suggestion")
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            if hasTrip {
+                Button("End trip") {
+                    showingEndConfirmation = true
+                }
+            }
+        }
     }
 
     @ViewBuilder
     private func sheetContent(for sheet: TodaySheet) -> some View {
         switch sheet {
         case .startTrip:
-            TodayStartTripSheet(lastTrip: trips.first, onStart: { trip in
+            TodayStartTripSheet(lastTrip: idle.lastTrip, onStart: { trip in
                 _ = refreshedTripIDs.insert(trip.id)
             })
         case .editTrip(let trip):
@@ -206,116 +284,260 @@ struct TodayView: View {
             NavigationStack {
                 CatchEditorView(fishCatch: fishCatch)
             }
+        case .setSize(let fishCatch):
+            TodaySizeSheet(
+                fishCatch: fishCatch,
+                onChange: { sizeClass in loggedSizeChanged(sizeClass, for: fishCatch.id) },
+                onDetails: { activeSheet = .editCatch(fishCatch) }
+            )
         case .pickSpecies:
             NavigationStack {
                 SpeciesPickerView(title: "Other fish", allowsUnknown: true, onPick: { species in
                     log(species)
                 })
             }
-        case .identify(let image):
-            IdentifyView(initialImage: image, onLogged: { fishCatch in
-                showBanner(for: fishCatch)
+        case .identify:
+            IdentifyView(initialImage: nil, onLogged: { fishCatch in
+                showLogged(for: fishCatch)
             })
+        case .lastTrip(let trip):
+            NavigationStack {
+                TripDetailView(trip: trip)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Done") { activeSheet = nil }
+                        }
+                    }
+            }
         }
-    }
-
-    // MARK: Grid contents
-
-    /// This trip's species first, then pinned, then the angler's usual catches, then popular fish for
-    /// their regions and the kinds of fish they picked at setup, so a new install still has a useful grid.
-    private func quickLogSpecies(for trip: Trip?) -> [Species] {
-        var candidates: [String] = []
-        if let trip {
-            candidates.append(contentsOf: trip.speciesTally.map { $0.speciesID })
-        }
-        candidates.append(contentsOf: settings.favouriteSpeciesIDs)
-        candidates.append(contentsOf: mostLoggedIDs)
-        candidates.append(contentsOf: SpeciesCatalog.suggested(
-            regions: settings.homeRegions,
-            groups: settings.targetGroups,
-            limit: Self.maxSpeciesTiles
-        ).map(\.id))
-
-        var seen = Set<String>()
-        var result: [Species] = []
-        for id in candidates {
-            if result.count >= Self.maxSpeciesTiles { break }
-            guard id != SpeciesCatalog.unknownID, seen.insert(id).inserted else { continue }
-            guard let species = SpeciesCatalog.species(id: id) else { continue }
-            result.append(species)
-        }
-        return result
-    }
-
-    private func tripCounts(for trip: Trip?) -> [String: Int] {
-        var counts: [String: Int] = [:]
-        guard let trip else { return counts }
-        for entry in trip.speciesTally {
-            counts[entry.speciesID] = entry.count
-        }
-        return counts
     }
 
     private var endTripMessage: String {
         let fish = activeTrip?.totalFish ?? 0
         if fish == 0 { return "No fish logged on this trip yet." }
-        return "\(fish) fish on this trip. You can still edit it later in the Log tab."
+        return "\(fish) fish on this trip. You can still edit it later in the Trips tab."
+    }
+
+    // MARK: Grid
+
+    private func gridKey(for trip: Trip?) -> TodayGridKey {
+        TodayGridKey(
+            tripID: trip?.id,
+            catchCount: trip?.catches.count ?? 0,
+            favourites: settings.favouriteSpeciesIDs,
+            regions: settings.homeRegions,
+            groups: settings.targetGroups,
+            mostLogged: mostLoggedIDs
+        )
+    }
+
+    /// Fish per species on the trip. A single pass with no sorting, cheap enough for every render.
+    private static func counts(for trip: Trip?) -> [String: Int] {
+        var counts: [String: Int] = [:]
+        for fishCatch in trip?.catches ?? [] {
+            counts[fishCatch.speciesID, default: 0] += fishCatch.count
+        }
+        return counts
+    }
+
+    /// Species on the trip in the order they were first caught, so new tiles append in a steady order.
+    private static func caughtSpeciesIDs(in trip: Trip) -> [String] {
+        var seen = Set<String>()
+        var ids: [String] = []
+        for fishCatch in trip.catches.sorted(by: { $0.timestamp < $1.timestamp })
+        where seen.insert(fishCatch.speciesID).inserted {
+            ids.append(fishCatch.speciesID)
+        }
+        return ids
+    }
+
+    /// Keeps the grid steady. A running trip keeps the order it started with and only grows at the
+    /// end; with no trip, the grid is ranked fresh from favourites and history.
+    private func refreshTiles() {
+        let favourites = settings.favouriteSpeciesIDs
+        var order = tileOrder
+        if let trip = activeTrip {
+            if order.tripID != trip.id {
+                if order.tripID == nil, !order.speciesIDs.isEmpty {
+                    // A trip that just started (from a tile, the start sheet, Siri or another tab)
+                    // keeps the tiles the angler was already looking at.
+                    order.tripID = trip.id
+                } else {
+                    order = rankedOrder(for: trip.id)
+                }
+            }
+            let caught = Self.caughtSpeciesIDs(in: trip)
+            order.appendMissing(favourites + caught)
+            order.trimTrailing(keeping: Set(favourites).union(caught))
+        } else if mostLoggedIDs != nil || order.speciesIDs.isEmpty {
+            order = rankedOrder(for: nil)
+        } else {
+            // Keep the last grid until history loads, so the tiles do not shuffle as the tab opens.
+            order.tripID = nil
+        }
+        guard order != tileOrder else { return }
+        tileOrder = order
+        order.save()
+    }
+
+    private func rankedOrder(for tripID: UUID?) -> TodayTileOrder {
+        let history: [String]
+        if let mostLoggedIDs {
+            history = mostLoggedIDs
+        } else {
+            // Only when a trip is first seen before history loaded; normally the fetch is in .task.
+            history = CatchLogger.mostLoggedSpeciesIDs(in: modelContext, limit: TodayTileOrder.maxRankedTiles)
+            mostLoggedIDs = history
+        }
+        let suggested = SpeciesCatalog.suggested(
+            regions: settings.homeRegions,
+            groups: settings.targetGroups,
+            limit: TodayTileOrder.maxRankedTiles
+        ).map(\.id)
+        return TodayTileOrder.ranked(
+            tripID: tripID,
+            favourites: settings.favouriteSpeciesIDs,
+            mostLogged: history,
+            suggested: suggested
+        )
+    }
+
+    // MARK: Appearing
+
+    /// Once per appearance: history for the idle grid, the idle card, and the stale trip question.
+    /// A running trip keeps its tile order, so it skips the history fetch.
+    private func screenAppeared() async {
+        if activeTrip == nil {
+            mostLoggedIDs = CatchLogger.mostLoggedSpeciesIDs(in: modelContext, limit: TodayTileOrder.maxRankedTiles)
+            loadIdleInfo()
+        }
+        checkStaleTrip()
+        // Catches may have changed species on another tab.
+        refreshTiles()
+    }
+
+    private func activeTripChanged() {
+        refreshActiveTripIfNeeded()
+        checkStaleTrip()
+        if activeTrip == nil {
+            loadIdleInfo()
+        }
+    }
+
+    /// Two small fetches: today's trips and the newest trip.
+    private func loadIdleInfo() {
+        let startOfToday = Calendar.current.startOfDay(for: .now)
+        let descriptor = FetchDescriptor<Trip>(predicate: #Predicate<Trip> { $0.startDate >= startOfToday })
+        let todayTrips = (try? modelContext.fetch(descriptor)) ?? []
+        let lastTrip = CatchLogger.latestTrip(in: modelContext)
+        idle = TodayIdleInfo(
+            summary: TodayIdleCard.summaryText(
+                todayTrips: todayTrips.count,
+                todayFish: todayTrips.reduce(0) { $0 + $1.totalFish },
+                lastTrip: lastTrip
+            ),
+            lastTrip: lastTrip
+        )
+    }
+
+    private func sheetDismissed() {
+        validateLogged()
+        if activeTrip == nil {
+            loadIdleInfo()
+        }
+        // The catch editor can change a species, which may need a new tile at the end.
+        refreshTiles()
     }
 
     // MARK: Logging
 
     private func log(_ species: Species, count: Int = 1, openDetails: Bool = false) {
+        endStaleTripBeforeLogging()
         let fishCatch = CatchLogger.logCatch(speciesID: species.id, count: count, in: modelContext)
         Haptics.logged()
-        showBanner(for: fishCatch)
+        showLogged(for: fishCatch)
         if openDetails {
             activeSheet = .editCatch(fishCatch)
         }
     }
 
     private func logAnother(like fishCatch: FishCatch) {
+        endStaleTripBeforeLogging()
         let newCatch = CatchLogger.logAnother(like: fishCatch, in: modelContext)
         Haptics.logged()
-        showBanner(for: newCatch)
+        showLogged(for: newCatch)
     }
 
     private func delete(_ fishCatch: FishCatch) {
-        if bannerInfo?.catchID == fishCatch.id {
-            hideBanner()
+        if logged?.catchID == fishCatch.id {
+            hideLogged()
         }
         CatchLogger.delete(fishCatch, in: modelContext)
         Haptics.warning()
     }
 
+    private func openPhotoID() {
+        endStaleTripBeforeLogging()
+        activeSheet = .identify
+    }
+
+    // MARK: Ending trips
+
+    /// A trip already flagged as forgotten ends at its last fish, whichever End button is used.
     private func endActiveTrip() {
         guard let trip = activeTrip else { return }
-        hideBanner()
-        CatchLogger.endTrip(trip, in: modelContext)
+        let date = staleTripID == trip.id ? TodayStaleTripCard.endDate(for: trip) : Date.now
+        finishTrip(trip, at: date)
+    }
+
+    private func finishTrip(_ trip: Trip, at date: Date) {
+        hideLogged()
+        CatchLogger.endTrip(trip, in: modelContext, at: date)
+        staleTripID = nil
         Haptics.tap()
-        mostLoggedIDs = CatchLogger.mostLoggedSpeciesIDs(in: modelContext, limit: Self.maxSpeciesTiles)
+        // Between trips is the one time the grid re-ranks, so fish caught often move up.
+        mostLoggedIDs = CatchLogger.mostLoggedSpeciesIDs(in: modelContext, limit: TodayTileOrder.maxRankedTiles)
+        announce("Trip ended.")
     }
 
-    // MARK: Banner
+    // MARK: Stale trip
 
-    private var bannerTransition: AnyTransition {
-        reduceMotion ? AnyTransition.opacity : AnyTransition.move(edge: .bottom).combined(with: .opacity)
+    /// Looked at when the screen appears or the app comes back, never while the angler is tapping.
+    private func checkStaleTrip() {
+        guard let trip = activeTrip else {
+            staleTripID = nil
+            return
+        }
+        let keptGoing = keptGoingTripID == trip.id.uuidString ? Date(timeIntervalSince1970: keptGoingAt) : nil
+        staleTripID = TodayStaleTripCard.isStale(trip, keptGoingAt: keptGoing) ? trip.id : nil
     }
 
-    private var bannerSizeClassBinding: Binding<SizeClass?> {
-        Binding<SizeClass?>(
-            get: { bannerSizeClass },
-            set: { newValue in
-                bannerSizeClass = newValue
-                if let fishCatch = bannerCatch {
-                    fishCatch.sizeClass = newValue
-                    CatchLogger.save(modelContext)
-                }
-                bannerToken = UUID()
-            }
-        )
+    private func endStaleTrip(_ trip: Trip) {
+        finishTrip(trip, at: TodayStaleTripCard.endDate(for: trip))
     }
 
-    private func showBanner(for fishCatch: FishCatch) {
+    private func keepGoing(_ trip: Trip) {
+        keptGoingTripID = trip.id.uuidString
+        keptGoingAt = Date.now.timeIntervalSince1970
+        staleTripID = nil
+    }
+
+    /// The card says logging starts a new trip: the forgotten one ends at its last fish, and the new
+    /// trip keeps the tiles exactly where they are.
+    private func endStaleTripBeforeLogging() {
+        guard let trip = activeTrip, staleTripID == trip.id else { return }
+        CatchLogger.endTrip(trip, in: modelContext, at: TodayStaleTripCard.endDate(for: trip))
+        staleTripID = nil
+        tileOrder.tripID = nil
+    }
+
+    // MARK: Logged confirmation
+
+    private var loggedTransition: AnyTransition {
+        reduceMotion ? AnyTransition.opacity : AnyTransition.move(edge: .top).combined(with: .opacity)
+    }
+
+    private func showLogged(for fishCatch: FishCatch) {
         let name = fishCatch.speciesName
         let title = fishCatch.count > 1 ? "\(fishCatch.count) \(name.lowercased()) logged" : "\(name) logged"
         let speciesID = fishCatch.speciesID
@@ -327,80 +549,104 @@ struct TodayView: View {
         }
         let info = TodayLoggedInfo(
             catchID: fishCatch.id,
+            token: UUID(),
             title: title,
             subtitle: "\(sameSpecies) this trip",
-            species: fishCatch.species
+            species: fishCatch.species,
+            sizeLabel: fishCatch.sizeClass?.label,
+            hasPhoto: !fishCatch.photos.isEmpty
         )
-        bannerCatch = fishCatch
-        bannerSizeClass = fishCatch.sizeClass
-        withAnimation(.easeOut(duration: 0.25)) {
-            bannerInfo = info
-        }
-        bannerToken = UUID()
-        if UIAccessibility.isVoiceOverRunning {
-            UIAccessibility.post(notification: .announcement, argument: "\(title). \(info.subtitle).")
-        }
+        loggedCatch = fishCatch
+        logged = info
+        announce("\(title). \(info.subtitle).")
     }
 
-    private func hideBanner() {
-        withAnimation(.easeInOut(duration: 0.25)) {
-            bannerInfo = nil
-        }
-        bannerCatch = nil
-    }
-
-    private func autoHideBanner() async {
-        guard bannerInfo != nil else { return }
-        try? await Task.sleep(nanoseconds: Self.bannerSeconds * 1_000_000_000)
-        guard !Task.isCancelled else { return }
-        hideBanner()
+    private func hideLogged() {
+        logged = nil
+        loggedCatch = nil
     }
 
     private func undoLastLog() {
-        guard let fishCatch = bannerCatch else {
-            hideBanner()
+        guard let fishCatch = loggedCatch else {
+            hideLogged()
             return
         }
-        hideBanner()
+        hideLogged()
         CatchLogger.delete(fishCatch, in: modelContext)
         Haptics.warning()
+        announce("Catch removed.")
     }
 
-    private func openBannerDetails() {
-        guard let fishCatch = bannerCatch else { return }
-        bannerToken = UUID()
-        activeSheet = .editCatch(fishCatch)
+    private func openSize() {
+        guard let fishCatch = loggedCatch else { return }
+        activeSheet = .setSize(fishCatch)
     }
 
-    /// The catch editor can delete the catch the banner points at, so check before touching it again.
-    private func validateBanner() {
-        guard let info = bannerInfo else { return }
+    private func loggedSizeChanged(_ sizeClass: SizeClass?, for catchID: UUID) {
+        guard logged?.catchID == catchID else { return }
+        logged?.sizeLabel = sizeClass?.label
+    }
+
+    /// The catch editor can delete the catch the confirmation points at, so check before touching it again.
+    private func validateLogged() {
+        guard let info = logged else { return }
         let targetID = info.catchID
         let descriptor = FetchDescriptor<FishCatch>(predicate: #Predicate<FishCatch> { $0.id == targetID })
         let stillThere = ((try? modelContext.fetchCount(descriptor)) ?? 0) > 0
-        if stillThere {
-            bannerSizeClass = bannerCatch?.sizeClass
-            bannerToken = UUID()
-        } else {
-            hideBanner()
+        guard stillThere, let fishCatch = loggedCatch else {
+            hideLogged()
+            return
         }
+        logged?.sizeLabel = fishCatch.sizeClass?.label
+        logged?.hasPhoto = logged?.hasPhoto == true || !fishCatch.photos.isEmpty
     }
 
-    // MARK: Photo ID
+    // MARK: Photo for the fish just logged
 
-    private func startPhotoID() {
-        Haptics.tap()
+    /// Camera when the phone has one, the photo library otherwise.
+    private func openPhoto() {
+        guard let fishCatch = loggedCatch else { return }
+        photoTarget = fishCatch
         if CameraPicker.isAvailable {
             showingCamera = true
         } else {
-            activeSheet = .identify(nil)
+            showingPhotoPicker = true
         }
     }
 
-    private func presentCapturedPhoto() {
-        guard let image = capturedImage else { return }
-        capturedImage = nil
-        activeSheet = .identify(image)
+    private func attachPhoto(_ image: UIImage) {
+        guard let fishCatch = photoTarget else { return }
+        photoTarget = nil
+        let catchID = fishCatch.id
+        let context = modelContext
+        Task {
+            await CatchLogger.attachPhoto(image, to: fishCatch, in: context)
+            photoAttached(to: catchID)
+        }
+    }
+
+    private func attachPickedPhoto(_ item: PhotosPickerItem) {
+        guard let fishCatch = photoTarget else { return }
+        photoTarget = nil
+        let catchID = fishCatch.id
+        let context = modelContext
+        Task {
+            guard let data = try? await item.loadTransferable(type: Data.self),
+                  let image = UIImage(data: data) else { return }
+            await CatchLogger.attachPhoto(image, to: fishCatch, in: context)
+            photoAttached(to: catchID)
+        }
+    }
+
+    private func photoAttached(to catchID: UUID) {
+        guard logged?.catchID == catchID else { return }
+        logged?.hasPhoto = true
+        announce("Photo added.")
+    }
+
+    private func announce(_ message: String) {
+        guard UIAccessibility.isVoiceOverRunning else { return }
+        UIAccessibility.post(notification: .announcement, argument: message)
     }
 
     // MARK: Conditions

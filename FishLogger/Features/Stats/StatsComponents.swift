@@ -64,6 +64,23 @@ enum StatsFormat {
         let suffix = hour < 12 ? "am" : "pm"
         return "\(twelveHour) \(suffix)"
     }
+
+    /// "12 fish", or "12 fish, logged 9 times" when some catches held more than one fish.
+    static func fishAndCatches(fish: Int, catches: Int) -> String {
+        guard catches != fish else { return self.fish(fish) }
+        let times = catches == 1 ? "once" : "\(catches) times"
+        return "\(self.fish(fish)), logged \(times)"
+    }
+
+    /// "Moon", "Moon and Weather", "Pressure, Moon, and Weather", in the reader's language.
+    static func list(_ items: [String]) -> String {
+        items.formatted(.list(type: .and))
+    }
+}
+
+/// Tallest a chart gets at large text sizes. Past this it pushes everything else off screen.
+enum StatsLayout {
+    static let maxChartHeight: CGFloat = 360
 }
 
 extension StatsCalculator.SpeciesCount {
@@ -113,6 +130,99 @@ struct StatsSummaryGrid: View {
                 spokenValue: stats.releasedShare == nil ? "no fish" : nil
             )
         ]
+    }
+}
+
+/// Label and value rows. Stands in for a chart at accessibility text sizes, where bar labels
+/// would collide or shrink to nothing.
+struct StatsValueRows: View {
+    struct Row: Identifiable {
+        let label: String
+        let value: String
+
+        var id: String { label }
+    }
+
+    let rows: [Row]
+
+    init(rows: [Row]) {
+        self.rows = rows
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(rows) { row in
+                if row.id != rows.first?.id {
+                    Divider()
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(row.label)
+                        .font(.body)
+                    Text(row.value)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 8)
+                .accessibilityElement(children: .combine)
+            }
+        }
+    }
+}
+
+/// Removable capsule for an active filter, matching the Trips tab. The whole chip is the remove button.
+struct StatsFilterChip: View {
+    let title: String
+    let species: Species?
+    let systemImage: String?
+    let onRemove: () -> Void
+
+    @Environment(AppSettings.self) private var settings
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+
+    init(title: String, species: Species?, systemImage: String?, onRemove: @escaping () -> Void) {
+        self.title = title
+        self.species = species
+        self.systemImage = systemImage
+        self.onRemove = onRemove
+    }
+
+    var body: some View {
+        let strong = settings.usesStrongContrast(colorSchemeContrast)
+        Button(action: onRemove) {
+            HStack(spacing: 6) {
+                if let species {
+                    SpeciesIcon(species: species, size: 18)
+                } else if let systemImage {
+                    Image(systemName: systemImage)
+                        .font(.caption)
+                        .accessibilityHidden(true)
+                }
+                // No line limit: the chips sit in a horizontal scroll view, so the full name always fits.
+                Text(title)
+                    .font(.subheadline.weight(.medium))
+                Image(systemName: "xmark.circle.fill")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
+            .padding(.leading, 8)
+            .padding(.trailing, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule().fill(Color.accentColor.opacity(strong ? 0.3 : 0.15))
+            )
+            .overlay(
+                Capsule().strokeBorder(
+                    strong ? Color.primary : Color.clear,
+                    lineWidth: strong ? 1.5 : 0
+                )
+            )
+            .frame(minHeight: settings.buttonSize.minTapSize)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Remove filter: \(title)")
     }
 }
 
