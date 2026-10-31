@@ -2,6 +2,42 @@ import SwiftData
 import SwiftUI
 import UIKit
 
+/// The Data page: what is saved, export, sample trips, deleting everything, and resetting settings.
+struct SettingsDataView: View {
+    var body: some View {
+        List {
+            SettingsDataSection()
+            SettingsResetSection()
+        }
+        .settingsListStyle()
+        .navigationTitle("Data")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// Puts every preference back to the default, in red at the bottom of the Data page.
+private struct SettingsResetSection: View {
+    @Environment(AppSettings.self) private var settings
+    @State private var confirmingReset = false
+
+    var body: some View {
+        Section {
+            Button("Reset settings", role: .destructive) {
+                confirmingReset = true
+            }
+            .confirmationDialog("Reset all settings?", isPresented: $confirmingReset, titleVisibility: .visible) {
+                Button("Reset settings", role: .destructive) {
+                    settings.resetAll()
+                    Haptics.warning()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Display, units, logging, and Photo ID settings go back to the defaults. Your trips, favourites, and API key stay.")
+            }
+        }
+    }
+}
+
 /// Counts, CSV export, sample trips, and the delete-everything button.
 /// Nothing here watches the whole log: the counts come from `fetchCount` when the section shows
 /// up or after an action here, and the CSV is only built when Export is tapped, off the main thread.
@@ -22,12 +58,16 @@ struct SettingsDataSection: View {
                 .onAppear { refreshCounts() }
             LabeledContent("Catches", value: counts.catches.formatted())
             LabeledContent("Photos", value: counts.photos.formatted())
+        } header: {
+            Text("On this iPhone")
+        }
 
+        Section {
             Button {
                 export()
             } label: {
                 HStack(spacing: 12) {
-                    Label(isExporting ? "Preparing export" : "Export CSV", systemImage: "square.and.arrow.up")
+                    Text(isExporting ? "Preparing export" : "Export CSV")
                     if isExporting {
                         Spacer(minLength: 8)
                         ProgressView()
@@ -40,25 +80,19 @@ struct SettingsDataSection: View {
                     .presentationDetents([.medium, .large])
                     .ignoresSafeArea()
             }
-        } header: {
-            Text("Your data")
         } footer: {
             Text(exportFooter)
         }
 
         Section {
-            Button {
+            Button("Add sample trips") {
                 SampleData.addSampleTrips(in: modelContext)
                 refreshCounts()
-            } label: {
-                Label("Add sample trips", systemImage: "plus.square.on.square")
             }
-            Button(role: .destructive) {
+            Button("Delete sample trips", role: .destructive) {
                 SampleData.deleteSampleTrips(in: modelContext)
                 Haptics.warning()
                 refreshCounts()
-            } label: {
-                Label("Delete sample trips", systemImage: "minus.square")
             }
             .disabled(counts.sampleTrips == 0)
         } header: {
@@ -68,10 +102,8 @@ struct SettingsDataSection: View {
         }
 
         Section {
-            Button(role: .destructive) {
+            Button("Delete everything", role: .destructive) {
                 confirmingDeleteAll = true
-            } label: {
-                Label("Delete everything", systemImage: "trash")
             }
             .disabled(counts.isEmpty)
             .confirmationDialog("Delete everything?", isPresented: $confirmingDeleteAll, titleVisibility: .visible) {

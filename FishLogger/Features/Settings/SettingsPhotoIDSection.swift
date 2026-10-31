@@ -1,28 +1,18 @@
 import SwiftUI
 
-/// The Photo ID row on the main Settings page. The switch, the key, and the model live a level
-/// down, the way stock Settings keeps technical options out of the main list.
-struct SettingsPhotoIDSection: View {
+/// The Photo ID row on the main Settings page, showing Off, On, or No key. The switch, the key,
+/// and the model live a level down, the way stock Settings keeps technical options out of the main list.
+struct SettingsPhotoIDRow: View {
     @Environment(AppSettings.self) private var settings
     /// Read from the keychain when the row shows, including on the way back from the Photo ID page.
     @State private var hasSavedKey = false
 
     var body: some View {
-        Section {
-            NavigationLink {
-                SettingsPhotoIDView()
-            } label: {
-                LabeledContent {
-                    Text(status)
-                } label: {
-                    Label("Photo ID", systemImage: "camera.viewfinder")
-                }
-            }
-            .onAppear {
-                hasSavedKey = KeychainStore.hasValue(for: .anthropicAPIKey)
-            }
-        } footer: {
-            Text("Suggests the species from a photo. Photos go to Anthropic only when you tap Identify.")
+        SettingsLinkRow("Photo ID", systemImage: "camera.viewfinder", color: .systemGray, value: status) {
+            SettingsPhotoIDView()
+        }
+        .onAppear {
+            hasSavedKey = KeychainStore.hasValue(for: .anthropicAPIKey)
         }
     }
 
@@ -47,13 +37,11 @@ struct SettingsPhotoIDView: View {
 
     var body: some View {
         @Bindable var settings = settings
-        Form {
+        List {
             Section {
-                Toggle(isOn: $settings.photoIDEnabled) {
-                    SettingsDetailLabel(title: "Photo ID", detail: "Suggests the species from a photo, using Claude.")
-                }
+                Toggle("Photo ID", isOn: $settings.photoIDEnabled)
             } footer: {
-                Text("Photos go to Anthropic only when you tap Identify. Each ID costs a few cents on your API account. The checklist works offline either way.")
+                Text("Suggests the species from a photo, using Claude. Photos go to Anthropic only when you tap Identify. Each ID costs a few cents on your API account. The checklist works offline either way.")
             }
 
             if settings.photoIDEnabled {
@@ -61,10 +49,11 @@ struct SettingsPhotoIDView: View {
                 advancedSection
             }
         }
+        .settingsListStyle()
         .navigationTitle("Photo ID")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear(perform: loadState)
-        // Picks up changes made elsewhere, such as Reset all settings.
+        // Picks up changes made elsewhere, such as Reset settings on the Data page.
         .onChange(of: settings.claudeModel) { _, newValue in
             syncModelDraft(newValue)
         }
@@ -107,9 +96,7 @@ struct SettingsPhotoIDView: View {
                 }
             }
 
-            Link(destination: Self.consoleURL) {
-                Label("Get a key at console.anthropic.com", systemImage: "arrow.up.right.square")
-            }
+            Link("Get a key at console.anthropic.com", destination: Self.consoleURL)
         } header: {
             Text("Anthropic API key")
         } footer: {
@@ -124,7 +111,6 @@ struct SettingsPhotoIDView: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .multilineTextAlignment(.trailing)
-                    .font(.body.monospaced())
                     .onChange(of: modelDraft) { _, newValue in
                         commitModelDraft(newValue)
                     }
