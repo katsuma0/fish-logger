@@ -34,16 +34,22 @@ enum AppModelContainer {
         }
     }()
 
-    /// Throwaway store for previews and tests.
+    /// Throwaway store for previews and tests. Each one is kept for the life of the process: a
+    /// SwiftUI view can hold the main context a little longer than its test holds the container,
+    /// and SwiftData traps when that context tries to autosave on app resign with its container gone.
     @MainActor
     static func inMemory() -> ModelContainer {
         do {
-            return try ModelContainer(
+            let container = try ModelContainer(
                 for: schema,
                 configurations: [ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)]
             )
+            kept.append(container)
+            return container
         } catch {
             fatalError("Could not create an in-memory store: \(error)")
         }
     }
+
+    @MainActor private static var kept: [ModelContainer] = []
 }
