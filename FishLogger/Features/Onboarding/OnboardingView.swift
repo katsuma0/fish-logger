@@ -122,20 +122,17 @@ struct OnboardingView: View {
                 stepHeader(title: "You're set", detail: doneDetail(count: count))
                 Text("Your quick log starts with")
                     .font(.headline)
+                // Names only, the way the quick log shows them.
                 LazyVGrid(columns: suggestionColumns, spacing: 10) {
                     ForEach(suggested) { species in
-                        HStack(spacing: 10) {
-                            SpeciesIcon(species: species, size: 30)
-                            Text(species.commonName)
-                                .font(.subheadline)
-                                .lineLimit(3)
-                                .fixedSize(horizontal: false, vertical: true)
-                            Spacer(minLength: 0)
-                        }
-                        .padding(10)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .cardBackground(tint: species.color)
-                        .accessibilityElement(children: .combine)
+                        Text(species.commonName)
+                            .font(.body)
+                            .lineLimit(3)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .cardBackground()
                     }
                 }
                 Text("Fish you catch move to the front on their own. Long-press a tile to make it a favourite.")

@@ -357,6 +357,7 @@ struct CatchEditorView: View {
     private func lureChip(_ lure: String, isCurrent: Bool) -> some View {
         // A capsule at one line. A long lure wraps instead of truncating, and keeps its text inside.
         let chipShape = RoundedRectangle(cornerRadius: settings.buttonSize.minTapSize / 2, style: .continuous)
+        let strong = settings.usesStrongContrast(colorSchemeContrast)
         return Button {
             fishCatch.lure = lure
         } label: {
@@ -369,11 +370,11 @@ struct CatchEditorView: View {
                 .frame(minHeight: settings.buttonSize.minTapSize)
                 .foregroundStyle(isCurrent ? Color.white : Color.primary)
                 .background(
-                    chipShape.fill(isCurrent ? Theme.accentFill : Color(uiColor: .tertiarySystemFill))
+                    chipShape.fill(isCurrent ? Theme.accentFillColor(strong: strong) : Color(uiColor: .tertiarySystemFill))
                 )
                 .overlay(
                     chipShape.strokeBorder(
-                        settings.usesStrongContrast(colorSchemeContrast) ? Color.primary : Color.clear,
+                        strong ? Color.primary : Color.clear,
                         lineWidth: 1.5
                     )
                 )

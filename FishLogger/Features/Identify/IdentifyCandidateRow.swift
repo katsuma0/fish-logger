@@ -30,7 +30,6 @@ struct IdentifyCandidateRow: View {
                     }
                 }
                 ProgressView(value: candidate.confidence)
-                    .tint(species.color)
                 if !candidate.reason.isEmpty {
                     Text(candidate.reason)
                         .font(.subheadline)

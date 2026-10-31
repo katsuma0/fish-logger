@@ -75,7 +75,7 @@ struct IdentifyConfirmView: View {
                     Label(logTitle, systemImage: "checkmark.circle.fill")
                 }
                 // Guarded above rather than disabled, so the button does not flash grey as the sheet closes.
-                .buttonStyle(PrimaryActionButtonStyle(tint: isUnknown ? Color.gray : species.color))
+                .buttonStyle(PrimaryActionButtonStyle())
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
             }

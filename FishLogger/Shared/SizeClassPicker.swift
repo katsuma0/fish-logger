@@ -85,7 +85,7 @@ struct SizeClassPicker: View {
             .foregroundStyle(isSelected ? Color.white : Color.primary)
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(isSelected ? Theme.accentFill : Color(uiColor: .tertiarySystemFill))
+                    .fill(isSelected ? Theme.accentFillColor(strong: strong) : Color(uiColor: .tertiarySystemFill))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
