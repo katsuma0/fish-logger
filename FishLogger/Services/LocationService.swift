@@ -89,6 +89,15 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
         return parts.isEmpty ? placemark.name : parts.joined(separator: ", ")
     }
 
+    /// Fishing region for where the phone is now. Needs a fix and a network connection; nil otherwise.
+    func currentRegion() async -> FishingRegion? {
+        guard let location = await currentLocation(timeout: 8) else { return nil }
+        guard let placemark = try? await CLGeocoder().reverseGeocodeLocation(location).first,
+              let area = placemark.administrativeArea
+        else { return nil }
+        return FishingRegion.from(administrativeArea: area)
+    }
+
     private func resumeWaiters(with location: CLLocation?) {
         let pending = waiters
         waiters.removeAll()

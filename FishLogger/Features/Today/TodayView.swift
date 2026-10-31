@@ -46,12 +46,6 @@ struct TodayView: View {
     @State private var refreshedTripIDs: Set<UUID> = []
     @State private var isFetchingWeather = false
 
-    /// Common Ontario catches, so a brand new install still has a useful grid.
-    private static let defaultSpeciesIDs = [
-        "walleye", "smallmouth_bass", "largemouth_bass", "northern_pike", "yellow_perch",
-        "black_crappie", "pumpkinseed", "bluegill", "rock_bass", "rainbow_trout",
-        "lake_trout", "brook_trout", "muskellunge"
-    ]
     private static let maxSpeciesTiles = 12
     private static let bannerSeconds: UInt64 = 8
 
@@ -227,7 +221,8 @@ struct TodayView: View {
 
     // MARK: Grid contents
 
-    /// This trip's species first, then pinned, then the angler's usual catches, then the Ontario defaults.
+    /// This trip's species first, then pinned, then the angler's usual catches, then popular fish for
+    /// their regions and the kinds of fish they picked at setup, so a new install still has a useful grid.
     private func quickLogSpecies(for trip: Trip?) -> [Species] {
         var candidates: [String] = []
         if let trip {
@@ -235,7 +230,11 @@ struct TodayView: View {
         }
         candidates.append(contentsOf: settings.favouriteSpeciesIDs)
         candidates.append(contentsOf: mostLoggedIDs)
-        candidates.append(contentsOf: Self.defaultSpeciesIDs)
+        candidates.append(contentsOf: SpeciesCatalog.suggested(
+            regions: settings.homeRegions,
+            groups: settings.targetGroups,
+            limit: Self.maxSpeciesTiles
+        ).map(\.id))
 
         var seen = Set<String>()
         var result: [Species] = []

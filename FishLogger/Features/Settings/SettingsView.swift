@@ -5,6 +5,7 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                SettingsFishingProfileSection()
                 SettingsDisplaySection()
                 SettingsUnitsSection()
                 SettingsLoggingSection()
@@ -34,6 +35,28 @@ struct SettingsDetailLabel: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
+}
+
+// MARK: Your fishing
+
+private struct SettingsFishingProfileSection: View {
+    @Environment(AppSettings.self) private var settings
+
+    var body: some View {
+        Section {
+            NavigationLink {
+                FishingProfileView()
+            } label: {
+                LabeledContent {
+                    Text(settings.homeRegionsSummary)
+                } label: {
+                    Label("Your fishing", systemImage: "map")
+                }
+            }
+        } footer: {
+            Text("Where you fish and what you fish for. Sets which species show up.")
         }
     }
 }

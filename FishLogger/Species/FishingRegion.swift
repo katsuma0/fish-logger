@@ -76,4 +76,44 @@ enum FishingRegion: String, CaseIterable, Codable, Identifiable {
     static func regions(in country: Country) -> [FishingRegion] {
         allCases.filter { $0.country == country }
     }
+
+    /// Region for a province or state as the geocoder reports it, either "ON" or "Ontario".
+    static func from(administrativeArea area: String) -> FishingRegion? {
+        let key = area.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return areaLookup[key]
+    }
+
+    private static let areaLookup: [String: FishingRegion] = {
+        let table: [FishingRegion: [String]] = [
+            .britishColumbia: ["bc", "british columbia"],
+            .prairies: ["ab", "alberta", "sk", "saskatchewan", "mb", "manitoba"],
+            .ontario: ["on", "ontario"],
+            .quebec: ["qc", "quebec", "québec"],
+            .atlanticCanada: ["nb", "new brunswick", "ns", "nova scotia", "pe", "pei", "prince edward island",
+                              "nl", "newfoundland and labrador", "newfoundland"],
+            .northernCanada: ["yt", "yukon", "nt", "northwest territories", "nu", "nunavut"],
+            .alaska: ["ak", "alaska"],
+            .pacificNorthwest: ["wa", "washington", "or", "oregon", "id", "idaho"],
+            .california: ["ca", "california", "nv", "nevada"],
+            .mountainWest: ["mt", "montana", "wy", "wyoming", "co", "colorado", "ut", "utah"],
+            .southwest: ["az", "arizona", "nm", "new mexico"],
+            .northernPlains: ["nd", "north dakota", "sd", "south dakota", "ne", "nebraska", "ks", "kansas"],
+            .southernPlains: ["tx", "texas", "ok", "oklahoma"],
+            .upperMidwest: ["mn", "minnesota", "wi", "wisconsin", "mi", "michigan", "ia", "iowa"],
+            .ohioValley: ["il", "illinois", "in", "indiana", "oh", "ohio", "mo", "missouri", "ky", "kentucky"],
+            .northeast: ["me", "maine", "nh", "new hampshire", "vt", "vermont", "ma", "massachusetts",
+                         "ri", "rhode island", "ct", "connecticut", "ny", "new york", "pa", "pennsylvania",
+                         "nj", "new jersey"],
+            .midAtlantic: ["md", "maryland", "de", "delaware", "va", "virginia", "wv", "west virginia",
+                           "dc", "district of columbia"],
+            .southeast: ["nc", "north carolina", "sc", "south carolina", "ga", "georgia", "tn", "tennessee",
+                         "al", "alabama", "ms", "mississippi", "ar", "arkansas", "la", "louisiana"],
+            .florida: ["fl", "florida"]
+        ]
+        var lookup: [String: FishingRegion] = [:]
+        for (region, names) in table {
+            for name in names { lookup[name] = region }
+        }
+        return lookup
+    }()
 }

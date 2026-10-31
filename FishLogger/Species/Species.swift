@@ -2,20 +2,63 @@ import Foundation
 import SwiftUI
 
 enum SpeciesGroup: String, CaseIterable, Identifiable {
-    case pike, perch, bassSunfish, troutChar, salmon, whitefish, catfish, other
+    case pike, perch, blackBass, sunfish, temperateBass, troutChar, salmon, whitefish, catfish, ancient, carpSuckers, other
 
     var id: String { rawValue }
 
     var label: String {
         switch self {
-        case .pike: "Pike and muskie"
+        case .pike: "Pike, muskie and pickerel"
         case .perch: "Walleye and perch"
-        case .bassSunfish: "Bass and sunfish"
+        case .blackBass: "Black bass"
+        case .sunfish: "Sunfish and crappie"
+        case .temperateBass: "White bass and stripers"
         case .troutChar: "Trout and char"
         case .salmon: "Salmon"
         case .whitefish: "Whitefish and grayling"
         case .catfish: "Catfish and bullheads"
+        case .ancient: "Sturgeon, gar and bowfin"
+        case .carpSuckers: "Carp, suckers and buffalo"
         case .other: "Everything else"
+        }
+    }
+
+    /// How an angler would say it when asked what they fish for.
+    var targetLabel: String {
+        switch self {
+        case .pike: "Pike and muskie"
+        case .perch: "Walleye and perch"
+        case .blackBass: "Bass"
+        case .sunfish: "Panfish"
+        case .temperateBass: "Stripers and white bass"
+        case .troutChar: "Trout"
+        case .salmon: "Salmon"
+        case .whitefish: "Whitefish"
+        case .catfish: "Catfish"
+        case .ancient: "Sturgeon and gar"
+        case .carpSuckers: "Carp"
+        case .other: "Whatever bites"
+        }
+    }
+
+    /// Groups offered in the "what do you fish for" step. "Everything else" is implied by skipping.
+    static var targetChoices: [SpeciesGroup] { allCases.filter { $0 != .other } }
+
+    /// The fish that stands for the group in pickers.
+    var representativeSpeciesID: String {
+        switch self {
+        case .pike: "northern_pike"
+        case .perch: "walleye"
+        case .blackBass: "largemouth_bass"
+        case .sunfish: "bluegill"
+        case .temperateBass: "striped_bass"
+        case .troutChar: "rainbow_trout"
+        case .salmon: "chinook_salmon"
+        case .whitefish: "lake_whitefish"
+        case .catfish: "channel_catfish"
+        case .ancient: "lake_sturgeon"
+        case .carpSuckers: "common_carp"
+        case .other: "freshwater_drum"
         }
     }
 }
@@ -143,8 +186,10 @@ struct Species: Identifiable, Hashable {
     /// Tile colour, 0xRRGGBB.
     let colorHex: UInt32
     let habitat: String
-    /// Where in Canada, in plain words.
+    /// Where it lives, in plain words.
     let range: String
+    /// Broad regions where anglers catch it. Empty means unknown, and the fish then shows everywhere.
+    var regions: Set<FishingRegion> = []
 
     static func == (lhs: Species, rhs: Species) -> Bool { lhs.id == rhs.id }
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
@@ -192,6 +237,11 @@ extension Species {
         guard let weightA, let weightB, lengthCm > 0 else { return nil }
         let grams = pow(10, weightA + weightB * log10(lengthCm * 10))
         return grams / 1000
+    }
+
+    /// True when the fish is caught in any of the given regions. No selection means everywhere.
+    func lives(in selected: Set<FishingRegion>) -> Bool {
+        selected.isEmpty || regions.isEmpty || !regions.isDisjoint(with: selected)
     }
 
     /// Every name a person might type, lowercased, for search.

@@ -31,10 +31,20 @@ struct RootView: View {
                 .tabItem { Label("Settings", systemImage: "gearshape") }
                 .tag(AppTab.settings)
         }
+        .fullScreenCover(isPresented: needsWelcome) {
+            OnboardingView(onFinish: {})
+                .environment(settings)
+                .appTextSize(settings.textSize)
+        }
         .onAppear(perform: syncSessionState)
         .onChange(of: activeTrips.count) { syncSessionState() }
         .onChange(of: settings.keepScreenOn) { syncSessionState() }
         .onChange(of: scenePhase) { syncSessionState() }
+    }
+
+    /// Finishing or skipping setup flips the setting, which closes the cover.
+    private var needsWelcome: Binding<Bool> {
+        Binding(get: { !settings.hasSeenWelcome }, set: { _ in })
     }
 
     /// Sensors and the screen-awake flag follow whether a trip is running.

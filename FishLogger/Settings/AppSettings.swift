@@ -117,6 +117,8 @@ final class AppSettings {
         static let photoIDEnabled = "photoIDEnabled"
         static let claudeModel = "claudeModel"
         static let hasSeenWelcome = "hasSeenWelcome"
+        static let homeRegions = "homeRegions"
+        static let targetGroups = "targetGroups"
     }
 
     static let defaultClaudeModel = "claude-opus-5-5"
@@ -247,6 +249,50 @@ final class AppSettings {
         set { withMutation(keyPath: \.claudeModel) { defaults.set(newValue, forKey: Keys.claudeModel) } }
     }
 
+    // MARK: Where and what you fish
+
+    /// Regions picked during setup. Empty means all of North America.
+    var homeRegions: Set<FishingRegion> {
+        get {
+            access(keyPath: \.homeRegions)
+            let raw = defaults.stringArray(forKey: Keys.homeRegions) ?? []
+            return Set(raw.compactMap(FishingRegion.init(rawValue:)))
+        }
+        set {
+            withMutation(keyPath: \.homeRegions) {
+                defaults.set(newValue.map(\.rawValue).sorted(), forKey: Keys.homeRegions)
+            }
+        }
+    }
+
+    /// Kinds of fish picked during setup. Empty means everything.
+    var targetGroups: Set<SpeciesGroup> {
+        get {
+            access(keyPath: \.targetGroups)
+            let raw = defaults.stringArray(forKey: Keys.targetGroups) ?? []
+            return Set(raw.compactMap(SpeciesGroup.init(rawValue:)))
+        }
+        set {
+            withMutation(keyPath: \.targetGroups) {
+                defaults.set(newValue.map(\.rawValue).sorted(), forKey: Keys.targetGroups)
+            }
+        }
+    }
+
+    /// Species for the chosen regions, alphabetical. Every species when no region is set.
+    var regionalSpecies: [Species] { SpeciesCatalog.available(in: homeRegions) }
+
+    /// Short summary for Settings, e.g. "Ontario" or "Ontario and 2 more".
+    var homeRegionsSummary: String {
+        let names = FishingRegion.allCases.filter { homeRegions.contains($0) }.map(\.label)
+        switch names.count {
+        case 0: return "All of North America"
+        case 1: return names[0]
+        default: return "\(names[0]) and \(names.count - 1) more"
+        }
+    }
+
+    /// Set once the first-launch questions are answered or skipped.
     var hasSeenWelcome: Bool {
         get { access(keyPath: \.hasSeenWelcome); return boolValue(Keys.hasSeenWelcome, default: false) }
         set { withMutation(keyPath: \.hasSeenWelcome) { defaults.set(newValue, forKey: Keys.hasSeenWelcome) } }

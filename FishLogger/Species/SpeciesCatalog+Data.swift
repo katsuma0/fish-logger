@@ -4,7 +4,7 @@ import Foundation
 // Weight coefficients are published standard weight (Ws) equations. Species without one we trust are
 // nil, so the app shows no weight estimate rather than a guessed one.
 extension SpeciesCatalog {
-    static let all: [Species] = [
+    static let canadianSpecies: [Species] = [
 
         // MARK: Walleye and perch
 
@@ -173,7 +173,7 @@ extension SpeciesCatalog {
             commonName: "Smallmouth bass",
             otherNames: ["Smallmouth", "Bronzeback", "Achigan à petite bouche"],
             scientificName: "Micropterus dolomieu",
-            group: .bassSunfish,
+            group: .blackBass,
             summary: "Hard-fighting bass of rocky, clear water. Jumps often and pulls harder than its size suggests.",
             idTips: [
                 "Bronze to brown with dark vertical bars, not a stripe along the side.",
@@ -195,7 +195,7 @@ extension SpeciesCatalog {
             commonName: "Largemouth bass",
             otherNames: ["Largemouth", "Bucketmouth", "Achigan à grande bouche"],
             scientificName: "Micropterus salmoides",
-            group: .bassSunfish,
+            group: .blackBass,
             summary: "Bass of warm, weedy water. Ambushes from cover and takes topwater well on summer evenings.",
             idTips: [
                 "Jaw reaches past the back of the eye when the mouth is closed.",
@@ -217,7 +217,7 @@ extension SpeciesCatalog {
             commonName: "Rock bass",
             otherNames: ["Red eye", "Goggle-eye", "Crapet de roche"],
             scientificName: "Ambloplites rupestris",
-            group: .bassSunfish,
+            group: .sunfish,
             summary: "Common panfish around rocks and docks. Bites readily, good for kids, decent eating.",
             idTips: [
                 "Bright red eye.",
@@ -239,7 +239,7 @@ extension SpeciesCatalog {
             commonName: "Black crappie",
             otherNames: ["Crappie", "Calico bass", "Speck", "Marigane noire"],
             scientificName: "Pomoxis nigromaculatus",
-            group: .bassSunfish,
+            group: .sunfish,
             summary: "Schooling panfish that suspends near cover. Light bite, soft mouth, very good eating.",
             idTips: [
                 "Seven or eight spines in the dorsal fin; white crappie has five or six.",
@@ -261,7 +261,7 @@ extension SpeciesCatalog {
             commonName: "White crappie",
             otherNames: ["Crappie", "Marigane blanche"],
             scientificName: "Pomoxis annularis",
-            group: .bassSunfish,
+            group: .sunfish,
             summary: "Close relative of the black crappie that handles murkier water. Uncommon in Canada.",
             idTips: [
                 "Five or six dorsal spines; black crappie has seven or eight.",
@@ -283,7 +283,7 @@ extension SpeciesCatalog {
             commonName: "Bluegill",
             otherNames: ["Sunfish", "Bream", "Crapet arlequin"],
             scientificName: "Lepomis macrochirus",
-            group: .bassSunfish,
+            group: .sunfish,
             summary: "Classic sunfish of warm, weedy water. Easy to catch on small baits and good eating.",
             idTips: [
                 "Solid dark ear flap with no red or orange edge.",
@@ -305,7 +305,7 @@ extension SpeciesCatalog {
             commonName: "Pumpkinseed",
             otherNames: ["Sunfish", "Sunny", "Crapet-soleil"],
             scientificName: "Lepomis gibbosus",
-            group: .bassSunfish,
+            group: .sunfish,
             summary: "The sunfish under almost every Ontario dock. Small, colourful, and easy to catch.",
             idTips: [
                 "Bright orange or red spot on the tip of the black ear flap.",
@@ -327,7 +327,7 @@ extension SpeciesCatalog {
             commonName: "White bass",
             otherNames: ["Silver bass", "Bar blanc"],
             scientificName: "Morone chrysops",
-            group: .bassSunfish,
+            group: .temperateBass,
             summary: "Schooling relative of the striped bass. Runs up rivers in spring and chases baitfish at the surface in summer.",
             idTips: [
                 "Silver sides with thin, faint dark stripes running nose to tail.",
@@ -349,7 +349,7 @@ extension SpeciesCatalog {
             commonName: "White perch",
             otherNames: ["Silver perch", "Bar-perche"],
             scientificName: "Morone americana",
-            group: .bassSunfish,
+            group: .temperateBass,
             summary: "Small schooling cousin of the white bass. Native in the Maritimes and St. Lawrence, invasive in the lower Great Lakes.",
             idTips: [
                 "Plain silver to olive-grey sides with no stripes on adults.",
@@ -371,7 +371,7 @@ extension SpeciesCatalog {
             commonName: "Striped bass",
             otherNames: ["Striper", "Bar rayé"],
             scientificName: "Morone saxatilis",
-            group: .bassSunfish,
+            group: .temperateBass,
             summary: "Sea-run bass that enters rivers to spawn. In Canada mostly a Maritime and lower St. Lawrence fish.",
             idTips: [
                 "Seven or eight bold, unbroken dark stripes along silver sides.",
@@ -892,7 +892,7 @@ extension SpeciesCatalog {
             commonName: "Common carp",
             otherNames: ["Carp", "Carpe commune"],
             scientificName: "Cyprinus carpio",
-            group: .other,
+            group: .carpSuckers,
             summary: "Large, strong, wary bottom feeder from Europe and Asia. Now common in warm water across southern Canada.",
             idTips: [
                 "Two pairs of barbels on the upper jaw, the longer pair at the corners of the mouth.",
@@ -936,7 +936,7 @@ extension SpeciesCatalog {
             commonName: "Bowfin",
             otherNames: ["Eyetail bowfin", "Dogfish", "Mudfish", "Poisson-castor"],
             scientificName: "Amia ocellicauda",
-            group: .other,
+            group: .ancient,
             summary: "Ancient, air-breathing fish of warm, weedy water. Fights hard and is tough to unhook.",
             idTips: [
                 "One long, soft dorsal fin running over half the back.",
@@ -958,7 +958,7 @@ extension SpeciesCatalog {
             commonName: "Longnose gar",
             otherNames: ["Gar", "Garpike", "Lépisosté osseux"],
             scientificName: "Lepisosteus osseus",
-            group: .other,
+            group: .ancient,
             summary: "Long, armoured fish that basks near the surface in summer. Hard to hook in its bony beak.",
             idTips: [
                 "Long, narrow beak more than twice the length of the rest of the head.",
@@ -980,7 +980,7 @@ extension SpeciesCatalog {
             commonName: "Lake sturgeon",
             otherNames: ["Rock sturgeon", "Sturgeon", "Esturgeon jaune"],
             scientificName: "Acipenser fulvescens",
-            group: .other,
+            group: .ancient,
             summary: "Long-lived bottom feeder that can pass 100 years and 2 m. Protected in much of its range, so check the rules and handle it gently.",
             idTips: [
                 "Rows of bony plates along the back and sides.",
@@ -1002,7 +1002,7 @@ extension SpeciesCatalog {
             commonName: "White sturgeon",
             otherNames: ["Pacific sturgeon", "Sturgeon", "Esturgeon blanc"],
             scientificName: "Acipenser transmontanus",
-            group: .other,
+            group: .ancient,
             summary: "The largest freshwater fish in North America; fish over 3 m still turn up in the Fraser River. Catch and release only in BC.",
             idTips: [
                 "In BC rivers, a sturgeon you catch is almost always a white sturgeon.",
@@ -1068,7 +1068,7 @@ extension SpeciesCatalog {
             commonName: "White sucker",
             otherNames: ["Sucker", "Mullet", "Meunier noir"],
             scientificName: "Catostomus commersonii",
-            group: .other,
+            group: .carpSuckers,
             summary: "Bottom feeder caught on worms in nearly every lake and river in Canada. Runs up streams in large numbers in spring.",
             idTips: [
                 "Thick-lipped mouth on the underside of the head.",
