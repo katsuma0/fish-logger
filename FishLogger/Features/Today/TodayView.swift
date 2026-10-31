@@ -1,3 +1,4 @@
+import Combine
 import PhotosUI
 import SwiftData
 import SwiftUI
@@ -50,6 +51,12 @@ private struct TodayIdleInfo {
     var lastTrip: Trip?
 }
 
+/// Whether the catch history behind the idle grid changed since it was last fetched. A class, so a
+/// save noting it does not redraw the screen.
+private final class TodayHistoryCache {
+    var isStale = true
+}
+
 /// The on-the-water screen. One tap logs a fish, and nothing moves the tiles while a trip runs.
 struct TodayView: View {
     @Environment(AppSettings.self) private var settings
@@ -63,6 +70,8 @@ struct TodayView: View {
     @State private var showingEndConfirmation = false
     @State private var logged: TodayLoggedInfo?
     @State private var loggedCatch: FishCatch?
+    /// The trip the confirmed log started, so Undo can take it away again if it is left empty.
+    @State private var loggedStartedTrip: Trip?
     @State private var photoTarget: FishCatch?
     @State private var showingCamera = false
     @State private var showingPhotoPicker = false
@@ -70,6 +79,7 @@ struct TodayView: View {
     @State private var tileOrder = TodayTileOrder.load()
     /// Nil until the first fetch, so the grid keeps its last order instead of shuffling as it loads.
     @State private var mostLoggedIDs: [String]?
+    @State private var historyCache = TodayHistoryCache()
     @State private var idle = TodayIdleInfo()
     @State private var staleTripID: UUID?
     @State private var refreshedTripIDs: Set<UUID> = []
@@ -114,6 +124,10 @@ struct TodayView: View {
         }
         .task {
             await screenAppeared()
+        }
+        // Every write goes through the main context, so this runs as the save happens, on any tab.
+        .onReceive(NotificationCenter.default.publisher(for: ModelContext.didSave)) { _ in
+            historyCache.isStale = true
         }
         .sheet(item: $activeSheet, onDismiss: { sheetDismissed() }) { sheet in
             sheetContent(for: sheet)
@@ -298,6 +312,7 @@ struct TodayView: View {
             }
         case .identify:
             IdentifyView(initialImage: nil, onLogged: { fishCatch in
+                moveOffStaleTrip(fishCatch)
                 showLogged(for: fishCatch)
             })
         case .lastTrip(let trip):
@@ -388,6 +403,7 @@ struct TodayView: View {
             // Only when a trip is first seen before history loaded; normally the fetch is in .task.
             history = CatchLogger.mostLoggedSpeciesIDs(in: modelContext, limit: TodayTileOrder.maxRankedTiles)
             mostLoggedIDs = history
+            historyCache.isStale = false
         }
         let suggested = SpeciesCatalog.suggested(
             regions: settings.homeRegions,
@@ -405,10 +421,17 @@ struct TodayView: View {
     // MARK: Appearing
 
     /// Once per appearance: history for the idle grid, the idle card, and the stale trip question.
-    /// A running trip keeps its tile order, so it skips the history fetch.
+    /// A running trip keeps its tile order, so it skips the history fetch. Coming back to the tab
+    /// only fetches history again when something was saved since, because it reads every catch.
     private func screenAppeared() async {
+        // Another tab may have deleted the catch the confirmation points at. This runs before the
+        // confirmation takes taps again, so Size, Photo and Undo never reach a deleted catch.
+        validateLogged()
         if activeTrip == nil {
-            mostLoggedIDs = CatchLogger.mostLoggedSpeciesIDs(in: modelContext, limit: TodayTileOrder.maxRankedTiles)
+            if mostLoggedIDs == nil || historyCache.isStale {
+                historyCache.isStale = false
+                mostLoggedIDs = CatchLogger.mostLoggedSpeciesIDs(in: modelContext, limit: TodayTileOrder.maxRankedTiles)
+            }
             loadIdleInfo()
         }
         checkStaleTrip()
@@ -476,8 +499,9 @@ struct TodayView: View {
         Haptics.warning()
     }
 
+    /// Opening Photo ID leaves a flagged trip alone: only a fish logged there starts a new trip, so
+    /// checking a fish and cancelling changes nothing.
     private func openPhotoID() {
-        endStaleTripBeforeLogging()
         activeSheet = .identify
     }
 
@@ -497,6 +521,8 @@ struct TodayView: View {
         Haptics.tap()
         // Between trips is the one time the grid re-ranks, so fish caught often move up.
         mostLoggedIDs = CatchLogger.mostLoggedSpeciesIDs(in: modelContext, limit: TodayTileOrder.maxRankedTiles)
+        // Fetched after the trip ended, so it is current.
+        historyCache.isStale = false
         announce("Trip ended.")
     }
 
@@ -525,10 +551,38 @@ struct TodayView: View {
     /// The card says logging starts a new trip: the forgotten one ends at its last fish, and the new
     /// trip keeps the tiles exactly where they are.
     private func endStaleTripBeforeLogging() {
-        guard let trip = activeTrip, staleTripID == trip.id else { return }
-        CatchLogger.endTrip(trip, in: modelContext, at: TodayStaleTripCard.endDate(for: trip))
+        guard let trip = activeTrip else { return }
+        if staleTripID == trip.id {
+            CatchLogger.endTrip(trip, in: modelContext, at: TodayStaleTripCard.endDate(for: trip))
+            staleTripID = nil
+            tileOrder.tripID = nil
+        } else if CatchLogger.isForgotten(trip) {
+            // Gone quiet while this screen stayed open: logCatch closes it and starts a new trip by
+            // itself, and the tiles should stay put for that one too.
+            tileOrder.tripID = nil
+        }
+    }
+
+    /// Photo ID saves its catch itself, so the flagged trip cannot end before the fish goes in. A
+    /// fish that landed on it moves to a new trip, as the card says, and the forgotten trip ends at
+    /// its last earlier fish. The new trip keeps the tiles where they are.
+    private func moveOffStaleTrip(_ fishCatch: FishCatch) {
+        guard let staleID = staleTripID else { return }
         staleTripID = nil
         tileOrder.tripID = nil
+        // Logging may already have ended a long quiet trip and started a new one by itself.
+        guard let stale = fishCatch.trip, stale.id == staleID, stale.isActive else { return }
+        let catchID = fishCatch.id
+        let lastEarlierFish = stale.catches.filter { $0.id != catchID }.map(\.timestamp).max()
+        CatchLogger.endTrip(stale, in: modelContext, at: lastEarlierFish ?? stale.startDate)
+        let trip = CatchLogger.startTrip(
+            in: modelContext,
+            waterBody: stale.waterBody,
+            method: stale.method,
+            at: fishCatch.timestamp
+        )
+        fishCatch.trip = trip
+        CatchLogger.save(modelContext)
     }
 
     // MARK: Logged confirmation
@@ -557,28 +611,55 @@ struct TodayView: View {
             hasPhoto: !fishCatch.photos.isEmpty
         )
         loggedCatch = fishCatch
+        loggedStartedTrip = Self.tripStarted(by: fishCatch)
         logged = info
         announce("\(title). \(info.subtitle).")
+    }
+
+    /// The trip this log started, if it did. A trip started by logging begins at the catch's own
+    /// time, whether it came from a tile, Another one, Photo ID, or after a forgotten trip ended. One
+    /// started by hand always begins earlier.
+    private static func tripStarted(by fishCatch: FishCatch) -> Trip? {
+        guard let trip = fishCatch.trip, trip.isActive, trip.startDate == fishCatch.timestamp else { return nil }
+        return trip
     }
 
     private func hideLogged() {
         logged = nil
         loggedCatch = nil
+        loggedStartedTrip = nil
     }
 
+    /// The catch the confirmation points at, or nil once it is gone. Reading a deleted model can crash.
+    private var liveLoggedCatch: FishCatch? {
+        guard let fishCatch = loggedCatch, !fishCatch.isDeleted, fishCatch.modelContext != nil else { return nil }
+        return fishCatch
+    }
+
+    /// Puts things back the way they were. A trip this log started that now holds nothing goes too,
+    /// so a stray tap does not leave a trip running with GPS on.
     private func undoLastLog() {
-        guard let fishCatch = loggedCatch else {
+        guard let fishCatch = liveLoggedCatch else {
             hideLogged()
             return
         }
+        let startedTrip = loggedStartedTrip
         hideLogged()
         CatchLogger.delete(fishCatch, in: modelContext)
+        if let trip = startedTrip, !trip.isDeleted, trip.modelContext != nil, trip.isActive,
+           !trip.catches.contains(where: { !$0.isDeleted && $0.modelContext != nil }) {
+            // Also stops GPS and the barometer, because the trip is still running.
+            CatchLogger.delete(trip, in: modelContext)
+        }
         Haptics.warning()
         announce("Catch removed.")
     }
 
     private func openSize() {
-        guard let fishCatch = loggedCatch else { return }
+        guard let fishCatch = liveLoggedCatch else {
+            hideLogged()
+            return
+        }
         activeSheet = .setSize(fishCatch)
     }
 
@@ -593,7 +674,7 @@ struct TodayView: View {
         let targetID = info.catchID
         let descriptor = FetchDescriptor<FishCatch>(predicate: #Predicate<FishCatch> { $0.id == targetID })
         let stillThere = ((try? modelContext.fetchCount(descriptor)) ?? 0) > 0
-        guard stillThere, let fishCatch = loggedCatch else {
+        guard stillThere, let fishCatch = liveLoggedCatch else {
             hideLogged()
             return
         }
@@ -605,7 +686,10 @@ struct TodayView: View {
 
     /// Camera when the phone has one, the photo library otherwise.
     private func openPhoto() {
-        guard let fishCatch = loggedCatch else { return }
+        guard let fishCatch = liveLoggedCatch else {
+            hideLogged()
+            return
+        }
         photoTarget = fishCatch
         if CameraPicker.isAvailable {
             showingCamera = true
@@ -617,29 +701,36 @@ struct TodayView: View {
     private func attachPhoto(_ image: UIImage) {
         guard let fishCatch = photoTarget else { return }
         photoTarget = nil
-        let catchID = fishCatch.id
+        guard !fishCatch.isDeleted, fishCatch.modelContext != nil else { return }
+        let photosBefore = fishCatch.photos.count
         let context = modelContext
         Task {
             await CatchLogger.attachPhoto(image, to: fishCatch, in: context)
-            photoAttached(to: catchID)
+            photoAttached(to: fishCatch, photosBefore: photosBefore)
         }
     }
 
     private func attachPickedPhoto(_ item: PhotosPickerItem) {
         guard let fishCatch = photoTarget else { return }
         photoTarget = nil
-        let catchID = fishCatch.id
+        guard !fishCatch.isDeleted, fishCatch.modelContext != nil else { return }
+        let photosBefore = fishCatch.photos.count
         let context = modelContext
         Task {
             guard let data = try? await item.loadTransferable(type: Data.self),
                   let image = UIImage(data: data) else { return }
             await CatchLogger.attachPhoto(image, to: fishCatch, in: context)
-            photoAttached(to: catchID)
+            photoAttached(to: fishCatch, photosBefore: photosBefore)
         }
     }
 
-    private func photoAttached(to catchID: UUID) {
-        guard logged?.catchID == catchID else { return }
+    /// attachPhoto quietly skips a catch deleted while the photo was encoding, and a photo that would
+    /// not encode, so only a photo that is really there gets the checkmark.
+    private func photoAttached(to fishCatch: FishCatch, photosBefore: Int) {
+        guard !fishCatch.isDeleted, fishCatch.modelContext != nil,
+              logged?.catchID == fishCatch.id,
+              fishCatch.photos.count > photosBefore
+        else { return }
         logged?.hasPhoto = true
         announce("Photo added.")
     }

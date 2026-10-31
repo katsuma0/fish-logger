@@ -214,14 +214,16 @@ enum HistoryMapPins {
     /// Above this many catch pins the Trips map shows one pin per trip, so panning stays smooth on a big log.
     static let groupingThreshold = 300
 
-    /// Catches with a location, optionally only one species.
-    static func catchPins(for trips: [Trip], speciesID: String?) -> [HistoryMapPin] {
+    /// Catches with a location, optionally only one species. Stops once it has `limit` pins, so a big
+    /// log never builds thousands of pins only to have them grouped per trip.
+    static func catchPins(for trips: [Trip], speciesID: String?, limit: Int = .max) -> [HistoryMapPin] {
         var pins: [HistoryMapPin] = []
         for trip in trips where !trip.historyIsGone {
             let tripName = trip.displayName
             for fishCatch in trip.catches {
                 if let speciesID, fishCatch.speciesID != speciesID { continue }
                 guard let coordinate = fishCatch.coordinate else { continue }
+                if pins.count >= limit { return pins }
                 let name = fishCatch.speciesName
                 pins.append(HistoryMapPin(
                     id: fishCatch.id,
@@ -311,7 +313,8 @@ enum HistoryMapPins {
     /// Everything the Trips map draws: catches (grouped per trip on a big log) and the spots of trips
     /// that have no located catch.
     static func mapPins(for trips: [Trip], speciesID: String?) -> (catches: [HistoryMapPin], spots: [HistoryMapPin]) {
-        var catches = catchPins(for: trips, speciesID: speciesID)
+        // One pin past the threshold is enough to know the log gets grouped.
+        var catches = catchPins(for: trips, speciesID: speciesID, limit: groupingThreshold + 1)
         if catches.count > groupingThreshold {
             catches = tripPins(for: trips, speciesID: speciesID)
         }

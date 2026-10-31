@@ -85,10 +85,25 @@ struct TraitKeyView: View {
             }
         }
         .task(id: TraitKeyMatchKey(selected: selected, regions: homeRegions, showsAllRegions: showsAllRegions)) {
+            let previousTop = matches.first
             matches = Self.topMatches(
                 for: selected,
                 regions: showsAllRegions ? [] : homeRegions
             )
+            announceTopMatch(ifChangedFrom: previousTop)
+        }
+    }
+
+    /// The match bar changes without a sound, so VoiceOver hears the new best match. Only when it
+    /// changes, not on every tap, so the chip's own "Selected" readout is not talked over each time.
+    private func announceTopMatch(ifChangedFrom previousTop: TraitKeyMatch?) {
+        guard !selected.isEmpty else { return }
+        let top = matches.first
+        guard top?.species.id != previousTop?.species.id else { return }
+        if let top {
+            IdentifyAnnouncement.post("Best match: \(top.species.commonName), \(top.matches) of \(selected.count).")
+        } else {
+            IdentifyAnnouncement.post("No match yet. Try unticking a feature.")
         }
     }
 

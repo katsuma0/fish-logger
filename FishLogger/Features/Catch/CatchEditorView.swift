@@ -18,6 +18,8 @@ struct CatchEditorView: View {
     @State private var didLoadRecentLures = false
     @State private var showingDeleteConfirmation = false
     @State private var didDelete = false
+    /// The catch's time and its trip's start and end when the editor opened. See `keepTripAroundCatch`.
+    @State private var opening: CatchEditorOpening?
     @FocusState private var focusedField: CatchEditorField?
 
     init(fishCatch: FishCatch) {
@@ -66,7 +68,17 @@ struct CatchEditorView: View {
                 Button("Done") { focusedField = nil }
             }
         }
-        .onAppear { chooseInitialSizeMode() }
+        .onAppear {
+            chooseInitialSizeMode()
+            rememberOpening()
+        }
+        // Covers a swipe down as well as Done. Also runs when the species list is pushed over the
+        // editor, which is harmless because the trip is always worked out again from `opening`.
+        .onDisappear {
+            if keepTripAroundCatch(), let context = fishCatch.catchEditorLiveContext {
+                CatchLogger.save(context)
+            }
+        }
         .task { loadRecentLures() }
     }
 
@@ -147,7 +159,9 @@ struct CatchEditorView: View {
 
     private var whenSection: some View {
         Section("When and how many") {
-            DatePicker("Caught", selection: $fishCatch.timestamp, displayedComponents: [.date, .hourAndMinute])
+            // No future times. A time outside the trip is allowed and widens the trip when the editor
+            // closes, so a fish forgotten after the trip ended can still be added.
+            DatePicker("Caught", selection: $fishCatch.timestamp, in: ...Date.now, displayedComponents: [.date, .hourAndMinute])
                 .frame(minHeight: settings.buttonSize.minTapSize)
             Stepper(value: $fishCatch.count, in: 1...99) {
                 Text("Count: \(fishCatch.count)")
@@ -455,8 +469,51 @@ struct CatchEditorView: View {
         CatchLogger.save(context)
     }
 
+    private func rememberOpening() {
+        guard opening == nil, !isGone else { return }
+        let trip = fishCatch.trip
+        opening = CatchEditorOpening(
+            timestamp: fishCatch.timestamp,
+            tripStart: trip?.startDate,
+            tripEnd: trip?.endDate
+        )
+    }
+
+    /// A catch moved before its trip's start or past its end widens the trip, so the catch stays
+    /// inside the trip it is listed under and Stats count that time as fishing. Worked out from the
+    /// trip as it was when the editor opened, so a time picked by mistake and then fixed leaves the
+    /// trip as it was. Runs on close rather than on every change, because the picker writes while it
+    /// spins. Returns true when it changed the trip.
+    @discardableResult
+    private func keepTripAroundCatch() -> Bool {
+        guard !isGone, let opening, let trip = fishCatch.trip, !trip.isDeleted, trip.modelContext != nil else {
+            return false
+        }
+        let time = fishCatch.timestamp
+        // Only a time changed here moves the trip, so opening an old catch and tapping Done never does.
+        let moved = time != opening.timestamp
+        let baseStart = opening.tripStart ?? trip.startDate
+        let wantedStart = moved ? min(baseStart, time) : baseStart
+        var changed = false
+        if trip.startDate != wantedStart {
+            trip.startDate = wantedStart
+            changed = true
+        }
+        // A running trip has no end to move.
+        if let end = trip.endDate {
+            let baseEnd = opening.tripEnd ?? end
+            let wantedEnd = moved ? max(baseEnd, time) : baseEnd
+            if end != wantedEnd {
+                trip.endDate = wantedEnd
+                changed = true
+            }
+        }
+        return changed
+    }
+
     private func finish() {
         focusedField = nil
+        keepTripAroundCatch()
         if let context = fishCatch.catchEditorLiveContext {
             CatchLogger.save(context)
         }
@@ -475,6 +532,14 @@ struct CatchEditorView: View {
         Haptics.warning()
         dismiss()
     }
+}
+
+/// What the editor saw when it opened, so closing it can tell whether the catch's time moved.
+private struct CatchEditorOpening {
+    let timestamp: Date
+    /// Nil when the catch has no trip.
+    let tripStart: Date?
+    let tripEnd: Date?
 }
 
 /// Two decimals is finer than anyone measures a fish, and keeps 17.913385 in from showing up in a field.

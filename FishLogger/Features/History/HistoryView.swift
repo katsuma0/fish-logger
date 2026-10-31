@@ -1,3 +1,4 @@
+import Combine
 import SwiftData
 import SwiftUI
 import UIKit
@@ -48,6 +49,10 @@ private final class HistoryFilterCache {
     var resultsToken: HistoryDataToken? = nil
     var appliedQuery = ""
     var hasAppeared = false
+    /// False while a trip's page or another tab covers the list.
+    var isVisible = false
+    /// A save landed while the list was out of sight.
+    var hasUnseenSaves = false
 }
 
 /// Species icons for the filter menu, which can only draw plain images. Each one is rendered the first
@@ -96,8 +101,8 @@ struct HistoryView: View {
     @State private var results: HistoryResults? = nil
     /// Species anywhere in the log, for the filter menu.
     @State private var loggedSpecies: [Species] = []
-    /// Goes up each time the screen comes back from a trip or another tab, since catches may have been
-    /// added or changed there.
+    /// Goes up when a save changes the log: at once while the list is on screen, otherwise when it comes
+    /// back. Coming back with nothing saved keeps the cached species, search index and map pins.
     @State private var dataVersion = 0
     @State private var cache = HistoryFilterCache()
 
@@ -132,7 +137,12 @@ struct HistoryView: View {
                 .task(id: filterKey) {
                     await refreshResults(for: filterKey)
                 }
+                // On the root, not the stack, so a pushed trip's page counts as the list being out of sight.
                 .onAppear(perform: noteAppeared)
+                .onDisappear { cache.isVisible = false }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: ModelContext.didSave).receive(on: DispatchQueue.main)) { _ in
+            modelSaved()
         }
     }
 
@@ -202,6 +212,7 @@ struct HistoryView: View {
             } actions: {
                 Button("Clear filters") { clearFilters() }
                     .buttonStyle(.borderedProminent)
+                    .tint(Theme.accentFill)
             }
         }
     }
@@ -373,12 +384,26 @@ struct HistoryView: View {
     }
 
     /// The first appearance is covered by the first pass. Later ones mean the person is back from a
-    /// trip's page or another tab, where catches may have changed, so the next pass reads fresh data.
+    /// trip's page or another tab. Only a save there, or an edit still waiting for autosave, can have
+    /// changed the log, so only then does the next pass read fresh data.
     private func noteAppeared() {
-        if cache.hasAppeared {
+        cache.isVisible = true
+        let isFirst = !cache.hasAppeared
+        let changed = cache.hasUnseenSaves || modelContext.hasChanges
+        cache.hasAppeared = true
+        cache.hasUnseenSaves = false
+        if !isFirst && changed {
+            dataVersion &+= 1
+        }
+    }
+
+    /// A save while the list is on screen refreshes it now. One while it is out of sight only leaves a
+    /// note, so the work happens once, when the list is back.
+    private func modelSaved() {
+        if cache.isVisible {
             dataVersion &+= 1
         } else {
-            cache.hasAppeared = true
+            cache.hasUnseenSaves = true
         }
     }
 

@@ -127,6 +127,9 @@ final class AppSettings {
         static let hasSeenWelcome = "hasSeenWelcome"
         static let homeRegions = "homeRegions"
         static let targetGroups = "targetGroups"
+        /// Named for the Today screen, where Keep going first lived. Kept so earlier answers still count.
+        static let keptGoingTripID = "todayKeptGoingTripID"
+        static let keptGoingAt = "todayKeptGoingAt"
     }
 
     static let defaultClaudeModel = "claude-opus-5-5"
@@ -336,6 +339,44 @@ final class AppSettings {
     var hasSeenWelcome: Bool {
         get { access(keyPath: \.hasSeenWelcome); return boolValue(Keys.hasSeenWelcome, default: false) }
         set { withMutation(keyPath: \.hasSeenWelcome) { defaults.set(newValue, forKey: Keys.hasSeenWelcome) } }
+    }
+
+    // MARK: Forgotten trips
+
+    /// The open trip the angler said they are still on when asked whether it was left running.
+    /// Every way of logging reads this, not only the Today screen that asks.
+    var keptGoingTripID: String {
+        get { access(keyPath: \.keptGoingTripID); return defaults.string(forKey: Keys.keptGoingTripID) ?? "" }
+        set { withMutation(keyPath: \.keptGoingTripID) { defaults.set(newValue, forKey: Keys.keptGoingTripID) } }
+    }
+
+    /// When they said so. Stored as seconds since 1970, the way Today's Keep going has always saved it.
+    var keptGoingAt: Date? {
+        get {
+            access(keyPath: \.keptGoingAt)
+            let seconds = defaults.double(forKey: Keys.keptGoingAt)
+            return seconds > 0 ? Date(timeIntervalSince1970: seconds) : nil
+        }
+        set {
+            withMutation(keyPath: \.keptGoingAt) {
+                if let newValue {
+                    defaults.set(newValue.timeIntervalSince1970, forKey: Keys.keptGoingAt)
+                } else {
+                    defaults.removeObject(forKey: Keys.keptGoingAt)
+                }
+            }
+        }
+    }
+
+    /// When the angler last said they were still on this trip, or nil if they never did.
+    func keptGoingDate(forTripID tripID: UUID) -> Date? {
+        keptGoingTripID == tripID.uuidString ? keptGoingAt : nil
+    }
+
+    /// Records Keep going for a trip, so no way of logging treats it as forgotten for another quiet stretch.
+    func markKeptGoing(tripID: UUID, at date: Date = .now) {
+        keptGoingTripID = tripID.uuidString
+        keptGoingAt = date
     }
 
     // MARK: Formatting shortcuts, so views do not repeat unit plumbing

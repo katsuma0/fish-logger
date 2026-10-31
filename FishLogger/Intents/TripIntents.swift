@@ -13,16 +13,25 @@ struct StartTripIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let context = AppModelContainer.shared.mainContext
-        // Starting again would quietly end the running trip, so say so instead.
+        var closedNote = ""
         if let running = CatchLogger.activeTrip(in: context) {
-            let message = "A trip is already running. It started \(tripIntentWhenText(running.startDate))."
-            return .result(dialog: "\(message)")
+            // Starting again would quietly end a trip that is still going, so say so instead.
+            guard CatchLogger.isForgotten(running) else {
+                let message = "A trip is already running. It started \(tripIntentWhenText(running.startDate))."
+                return .result(dialog: "\(message)")
+            }
+            // Logging a fish would close a trip this quiet anyway, so starting does the same.
+            let when = tripIntentWhenText(running.startDate)
+            closedNote = CatchLogger.lastCatchDate(in: running) == nil
+                ? "The trip that started \(when) was left running with no fish, so I ended it. "
+                : "The trip that started \(when) was left running, so I ended it at your last fish. "
+            CatchLogger.endTrip(running, in: context, at: CatchLogger.forgottenTripEndDate(for: running))
         }
         let trip = CatchLogger.startTrip(in: context)
         Task {
             await TripConditionsUpdater.refresh(trip, in: context)
         }
-        let message = "Trip started \(tripIntentWhenText(trip.startDate))."
+        let message = "\(closedNote)Trip started \(tripIntentWhenText(trip.startDate))."
         return .result(dialog: "\(message)")
     }
 }
@@ -41,16 +50,35 @@ struct EndTripIntent: AppIntent {
         guard let trip = CatchLogger.activeTrip(in: context) else {
             return .result(dialog: "No trip is running.")
         }
-        CatchLogger.endTrip(trip, in: context)
+        let now = Date.now
+        let forgotten = Self.isForgotten(trip, now: now)
+        let hadFish = CatchLogger.lastCatchDate(in: trip) != nil
+        CatchLogger.endTrip(trip, in: context, at: forgotten ? CatchLogger.forgottenTripEndDate(for: trip) : now)
         let fish = trip.totalFish
         let duration = tripIntentDurationText(trip.duration)
         let message: String
-        if fish == 0 {
+        if forgotten {
+            // Siri cannot ask "Still fishing?" first, so it says where the trip was cut off.
+            let when = tripIntentWhenText(trip.startDate)
+            if hadFish {
+                message = "That trip started \(when), so I ended it at your last fish. \(fish) fish in \(duration). You can change the end time in the Trips tab."
+            } else {
+                message = "That trip started \(when) and has no fish, so I ended it at its start time. You can change the end time in the Trips tab."
+            }
+        } else if fish == 0 {
             message = "Trip ended after \(duration). No fish logged."
         } else {
             message = "Trip ended. \(fish) fish in \(duration)."
         }
         return .result(dialog: "\(message)")
+    }
+
+    /// A trip left running from an earlier day, quiet long enough that logging a fish would treat it
+    /// as over too. Same quiet rule and Keep going answer as logging, but only for earlier days:
+    /// a long, quiet trip today may be real, and ending it at its last fish would cut it short.
+    @MainActor
+    private static func isForgotten(_ trip: Trip, now: Date) -> Bool {
+        trip.startDate < Calendar.current.startOfDay(for: now) && CatchLogger.isForgotten(trip, now: now)
     }
 }
 

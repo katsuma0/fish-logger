@@ -32,10 +32,12 @@ struct PhotoThumbnail: View {
     @ViewBuilder
     private func content(_ image: UIImage?) -> some View {
         if let image {
+            // A photo, so Smart Invert leaves its colours alone. The grey placeholder still inverts.
             Image(uiImage: image)
                 .resizable()
                 .scaledToFill()
                 .frame(width: size, height: size)
+                .accessibilityIgnoresInvertColors()
         } else {
             Rectangle()
                 .fill(Color(uiColor: .systemGray5))

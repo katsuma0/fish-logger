@@ -19,6 +19,8 @@ struct TripEditorView: View {
     @State private var weatherMessage: String?
     @State private var isReadingBarometer = false
     @State private var barometerMessage: String?
+    /// Where the trip started when the editor opened, so its catches can move by as much as it did.
+    @State private var openedStart: Date
 
     private enum Field: Hashable {
         case name, airTemp, cloudCover, precipitation, windSpeed, pressure, waterTemp, notes
@@ -29,6 +31,7 @@ struct TripEditorView: View {
 
     init(trip: Trip) {
         _trip = Bindable(trip)
+        _openedStart = State(initialValue: trip.startDate)
     }
 
     var body: some View {
@@ -104,8 +107,11 @@ struct TripEditorView: View {
         }
     }
 
+    /// Catches never move on their own: a running trip whose start is corrected keeps its fish where
+    /// they are. When the times leave some outside, one button brings them along.
     private var timeSection: some View {
-        Section {
+        let outsideCount = catchesOutsideTimes.count
+        return Section {
             DatePicker(
                 "Started",
                 selection: $trip.startDate,
@@ -117,18 +123,24 @@ struct TripEditorView: View {
                 DatePicker(
                     "Ended",
                     selection: endDateBinding,
-                    in: trip.startDate...,
+                    in: trip.startDate...latestEndDate,
                     displayedComponents: [.date, .hourAndMinute]
                 )
                 .tripEditorRow(settings)
             } else {
                 LabeledContent("Ended", value: "Still fishing")
             }
+            if outsideCount > 0 {
+                Button(moveCatchesTitle(outsideCount: outsideCount)) {
+                    moveCatches()
+                }
+                .tripEditorRow(settings)
+            }
         } header: {
             Text("Time")
         } footer: {
-            if trip.endDate == nil {
-                Text("End the trip from the Today screen when you are done.")
+            if let footer = timeFooter(outsideCount: outsideCount) {
+                Text(footer)
             }
         }
     }
@@ -328,12 +340,62 @@ struct TripEditorView: View {
         )
     }
 
+    /// A trip cannot end in the future.
+    private var latestEndDate: Date {
+        max(trip.startDate, Date.now)
+    }
+
     private var endDateBinding: Binding<Date> {
         let trip = trip
         return Binding<Date>(
             get: { trip.endDate ?? trip.startDate },
-            set: { newValue in trip.endDate = max(newValue, trip.startDate) }
+            set: { newValue in
+                trip.endDate = min(max(newValue, trip.startDate), max(trip.startDate, Date.now))
+            }
         )
+    }
+
+    /// From the start to the end, or to now while the trip runs.
+    private var tripTimes: ClosedRange<Date> {
+        trip.startDate...max(trip.startDate, trip.endDate ?? Date.now)
+    }
+
+    /// Skips catches deleted elsewhere while the editor is open, because reading one can crash.
+    private var liveCatches: [FishCatch] {
+        trip.catches.filter { !$0.isDeleted && $0.modelContext != nil }
+    }
+
+    private var catchesOutsideTimes: [FishCatch] {
+        let times = tripTimes
+        return liveCatches.filter { !times.contains($0.timestamp) }
+    }
+
+    /// A finished trip whose start moved, such as one logged late and moved back to the day it
+    /// happened: every catch goes with it. A running trip, or one with only its end changed, is being
+    /// trimmed, so only the catches left outside move.
+    private var wholeTripMoved: Bool {
+        trip.endDate != nil && trip.startDate != openedStart
+    }
+
+    private func moveCatchesTitle(outsideCount: Int) -> String {
+        if wholeTripMoved {
+            let count = liveCatches.count
+            return count == 1 ? "Move the catch with the trip" : "Move the \(count) catches with the trip"
+        }
+        return outsideCount == 1 ? "Move the catch inside these times" : "Move the \(outsideCount) catches inside these times"
+    }
+
+    private func timeFooter(outsideCount: Int) -> String? {
+        var lines: [String] = []
+        if outsideCount == 1 {
+            lines.append("1 catch is outside these times.")
+        } else if outsideCount > 1 {
+            lines.append("\(outsideCount) catches are outside these times.")
+        }
+        if trip.endDate == nil {
+            lines.append("End the trip from the Today screen when you are done.")
+        }
+        return lines.isEmpty ? nil : lines.joined(separator: " ")
     }
 
     /// Eight compass points. Reported directions snap to the nearest one.
@@ -378,6 +440,20 @@ struct TripEditorView: View {
         }
     }
 
+    /// A moved trip shifts every catch by as much as Started moved since the editor opened, so a trip
+    /// moved to another day takes its fish along. Anything still outside goes to the nearest end, the
+    /// same rule logging uses for a catch added to a finished trip.
+    private func moveCatches() {
+        let offset = wholeTripMoved ? trip.startDate.timeIntervalSince(openedStart) : 0
+        let times = tripTimes
+        for fishCatch in liveCatches {
+            let moved = fishCatch.timestamp.addingTimeInterval(offset)
+            fishCatch.timestamp = min(max(moved, times.lowerBound), times.upperBound)
+        }
+        openedStart = trip.startDate
+        CatchLogger.save(modelContext)
+    }
+
     private func updateSkyForStartDate() {
         trip.moonPhase = Astronomy.moon(on: trip.startDate).phase
         guard let latitude = trip.latitude, let longitude = trip.longitude else { return }
@@ -392,6 +468,8 @@ struct TripEditorView: View {
         locationMessage = nil
         let location = await LocationService.shared.currentLocation(maxAge: 60)
         isLocating = false
+        // The trip may have been deleted elsewhere during the wait. Writing to it then would fail.
+        guard !trip.isDeleted, trip.modelContext != nil else { return }
         guard let location else {
             locationMessage = LocationService.shared.isDenied
                 ? "Location is off for this app. You can turn it on in the Settings app."
@@ -408,7 +486,10 @@ struct TripEditorView: View {
         if trip.locationName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             if let saved = CatchLogger.nearbySpotName(to: location, in: modelContext) {
                 trip.locationName = saved
-            } else if let name = await LocationService.shared.placeName(for: location) {
+            } else if let name = await LocationService.shared.placeName(for: location),
+                      !trip.isDeleted, trip.modelContext != nil,
+                      // The person may have typed a name while the geocoder was working.
+                      trip.locationName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 trip.locationName = name
             }
         }

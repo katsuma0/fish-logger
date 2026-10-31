@@ -1,3 +1,4 @@
+import Combine
 import SwiftData
 import SwiftUI
 import UIKit
@@ -9,8 +10,18 @@ struct SpeciesDetailView: View {
 
     @Environment(AppSettings.self) private var settings
     @Environment(\.modelContext) private var modelContext
-    /// This species only, newest first. Filtered in the store, so a long log never loads here.
+    /// The latest catches of this species, newest first. Filtered and capped in the store, so a
+    /// species that fills most of a long log still loads only the rows the page shows.
     @Query private var catches: [FishCatch]
+    /// Totals over every catch of this species, from a small fetch after each save rather than in `body`.
+    @State private var totals: SpeciesCatchTotals?
+    /// Goes up on a save while the page is on screen, so the totals are counted again.
+    @State private var saves = 0
+    /// Set by every save and cleared when the totals are counted. While another tab or a pushed page
+    /// covers this one, a save is only noted and counted when the page comes back, so logging on
+    /// Today never waits on this page, and coming back with nothing new costs no fetch.
+    @State private var totalsAreStale = true
+    @State private var isOnScreen = false
     /// The running trip, if any. Decides whether logging needs a trip started first.
     @Query(filter: #Predicate<Trip> { $0.endDate == nil }) private var openTrips: [Trip]
     @State private var editingCatch: FishCatch?
@@ -27,11 +38,12 @@ struct SpeciesDetailView: View {
         self.species = species
         // A local constant, because the predicate macro cannot capture a property of self.
         let speciesID = species.id
-        _catches = Query(
-            filter: #Predicate<FishCatch> { $0.speciesID == speciesID },
-            sort: \FishCatch.timestamp,
-            order: .reverse
+        var descriptor = FetchDescriptor<FishCatch>(
+            predicate: #Predicate<FishCatch> { $0.speciesID == speciesID },
+            sortBy: [SortDescriptor(\FishCatch.timestamp, order: .reverse)]
         )
+        descriptor.fetchLimit = SpeciesDetailCatchesSection.recentLimit
+        _catches = Query(descriptor)
     }
 
     var body: some View {
@@ -40,12 +52,13 @@ struct SpeciesDetailView: View {
 
         List {
             headerSection
-            logSection(hasTrip: !openTrips.isEmpty)
+            // A forgotten trip counts as none, since logging closes it and starts a new one.
+            logSection(hasTrip: openTrips.first.map { !CatchLogger.isForgotten($0) } ?? false)
             identificationSection
             lookalikesSection
             sizeGuideSection
             whereSection
-            SpeciesDetailCatchesSection(catches: catches) { fishCatch in
+            SpeciesDetailCatchesSection(catches: catches, totals: totals) { fishCatch in
                 editingCatch = fishCatch
             }
         }
@@ -70,6 +83,19 @@ struct SpeciesDetailView: View {
         .loggedToast($loggedCatch)
         .onChange(of: loggedCatch == nil) { _, hidden in
             if hidden { toastHidden() }
+        }
+        // Logging here, Undo, the catch editor, and logging on another tab all save.
+        .onReceive(NotificationCenter.default.publisher(for: ModelContext.didSave).receive(on: DispatchQueue.main)) { _ in
+            totalsAreStale = true
+            if isOnScreen { saves += 1 }
+        }
+        .onAppear {
+            isOnScreen = true
+            if totalsAreStale { saves += 1 }
+        }
+        .onDisappear { isOnScreen = false }
+        .task(id: saves) {
+            if totalsAreStale { loadTotals() }
         }
     }
 
@@ -219,10 +245,16 @@ struct SpeciesDetailView: View {
 
     // MARK: Actions
 
+    private func loadTotals() {
+        totalsAreStale = false
+        let counted = SpeciesCatchTotals.load(speciesID: species.id, in: modelContext)
+        if counted != totals { totals = counted }
+    }
+
     /// Logs straight away during a trip. Reading the guide at home, a stray tap must not start a
     /// trip with a fish in it, so with no trip running it asks first.
     private func logTapped() {
-        if CatchLogger.activeTrip(in: modelContext) != nil {
+        if CatchLogger.currentTrip(in: modelContext) != nil {
             log()
         } else {
             confirmingStartTrip = true
@@ -230,10 +262,10 @@ struct SpeciesDetailView: View {
     }
 
     private func log() {
-        let hadTrip = CatchLogger.activeTrip(in: modelContext) != nil
+        let tripBefore = CatchLogger.currentTrip(in: modelContext)
         let fishCatch = CatchLogger.logCatch(speciesID: species.id, in: modelContext)
         Haptics.logged()
-        if !hadTrip, let trip = fishCatch.trip {
+        if let trip = fishCatch.trip, trip.id != tripBefore?.id {
             startedTrip = trip
             // A fresh trip still needs GPS, weather, and moon; fill them in without blocking the tap.
             Task {
@@ -251,10 +283,10 @@ struct SpeciesDetailView: View {
     /// that this page started and that now holds nothing is removed too.
     private func toastHidden() {
         guard let loggedID = lastLoggedID else { return }
-        let trip = startedTrip
+        let started = startedTrip
         lastLoggedID = nil
         startedTrip = nil
-        guard let trip, !trip.isDeleted, trip.modelContext != nil else { return }
+        guard let trip = started, !trip.isDeleted, trip.modelContext != nil else { return }
         let stillLogged = FetchDescriptor<FishCatch>(predicate: #Predicate<FishCatch> { $0.id == loggedID })
         // Timed out or closed: the catch is still there, so the trip stays.
         guard ((try? modelContext.fetchCount(stillLogged)) ?? 1) == 0 else { return }

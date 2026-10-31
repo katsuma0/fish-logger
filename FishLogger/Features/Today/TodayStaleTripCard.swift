@@ -13,20 +13,28 @@ struct TodayStaleTripCard: View {
     /// No fish for this long and the trip probably ended without anyone pressing End trip.
     static let quietInterval: TimeInterval = 8 * 60 * 60
 
+    /// A trip from an earlier day also has to be quiet this long. A night trip that crossed midnight
+    /// with a fish a few minutes ago is still running, and asking then would split it in two.
+    static let overnightQuietInterval: TimeInterval = 3 * 60 * 60
+
     init(trip: Trip, onEnd: @escaping () -> Void, onKeepGoing: @escaping () -> Void) {
         self.trip = trip
         self.onEnd = onEnd
         self.onKeepGoing = onKeepGoing
     }
 
-    /// A trip from an earlier day, or one quiet for 8 hours. After Keep going, only another quiet
-    /// stretch brings the question back.
+    /// A trip quiet for 8 hours, or one from an earlier day that has been quiet for 3. Quiet counts
+    /// from the last fish, the start, or Keep going, whichever is newest, so a fish logged minutes ago
+    /// never brings the question up. After Keep going, only another 8 hour quiet stretch does.
     static func isStale(_ trip: Trip, keptGoingAt: Date?, now: Date = .now) -> Bool {
         var lastActivity = lastCatchDate(in: trip) ?? trip.startDate
         lastActivity = max(lastActivity, trip.startDate)
         if let keptGoingAt { lastActivity = max(lastActivity, keptGoingAt) }
-        if now.timeIntervalSince(lastActivity) > quietInterval { return true }
-        return keptGoingAt == nil && trip.startDate < Calendar.current.startOfDay(for: now)
+        let quiet = now.timeIntervalSince(lastActivity)
+        if quiet > quietInterval { return true }
+        return keptGoingAt == nil
+            && trip.startDate < Calendar.current.startOfDay(for: now)
+            && quiet > overnightQuietInterval
     }
 
     /// When the trip should end if the angler says it is over: at the last fish, or at the start.

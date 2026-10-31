@@ -45,6 +45,9 @@ struct HistoryMapView: View {
     /// False until the first pins are in, so the empty card does not flash on open.
     @State private var pinsReady = false
     @State private var fittedKey: HistoryMapFitKey? = nil
+    /// The key the pins on screen were built for. `.task(id:)` runs again each time the map comes back
+    /// from a trip's page or another tab, and with nothing changed the pins it has are still right.
+    @State private var builtKey: HistoryMapPinsKey? = nil
 
     init(
         trips: [Trip],
@@ -93,6 +96,9 @@ struct HistoryMapView: View {
             }
         }
         .task(id: pinsKey) {
+            let key = pinsKey
+            guard builtKey != key else { return }
+            builtKey = key
             updatePins()
         }
     }

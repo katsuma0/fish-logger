@@ -31,6 +31,9 @@ struct TodayLoggedBanner: View {
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
     @Environment(\.accessibilitySwitchControlEnabled) private var switchControlEnabled
     @ScaledMetric(relativeTo: .subheadline) private var iconSize: CGFloat = 30
+    /// The icon plus the longest species word ("Pumpkinseed") on one line. Any narrower and the title
+    /// breaks mid-word, so the banner stacks instead.
+    @ScaledMetric(relativeTo: .subheadline) private var minSummaryWidth: CGFloat = 140
     /// Off for a moment after each log, so a quick second tap meant for a tile is not caught here.
     @State private var acceptsTaps = false
 
@@ -55,14 +58,23 @@ struct TodayLoggedBanner: View {
 
     var body: some View {
         let strong = settings.usesStrongContrast(colorSchemeContrast)
-        let stacked = dynamicTypeSize.isAccessibilitySize
-        let layout = stacked
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-            : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
 
-        layout {
-            summary
-            buttons(stretch: stacked)
+        // One row while the summary keeps room for a whole species word next to the buttons. Larger
+        // text, larger buttons, a size label, or the Close button that VoiceOver and Switch Control
+        // add can take that room, and then the buttons go on a line of their own.
+        ViewThatFits(in: .horizontal) {
+            if !dynamicTypeSize.isAccessibilitySize {
+                HStack(alignment: .center, spacing: 8) {
+                    // Measured at the floor, not the title on one line, so normal sizes keep the row.
+                    summary
+                        .frame(idealWidth: minSummaryWidth)
+                    buttons(stretch: false)
+                }
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                summary
+                buttons(stretch: true)
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)

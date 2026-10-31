@@ -2,17 +2,22 @@ import SwiftData
 import SwiftUI
 
 /// "Your catches" on a species page: totals, measured records, and the latest entries.
+/// The totals come in worked out already, so this never walks every catch of the species in `body`.
 struct SpeciesDetailCatchesSection: View {
-    /// Catches of one species, newest first.
+    /// The latest catches of one species, newest first. At most `recentLimit` are shown.
     let catches: [FishCatch]
+    /// Over every catch of the species. Nil until the first count is done, so no "0" flashes up.
+    let totals: SpeciesCatchTotals?
     let onOpen: (FishCatch) -> Void
 
     @Environment(AppSettings.self) private var settings
 
-    private static let recentLimit = 10
+    /// The species page fetches only this many rows.
+    static let recentLimit = 10
 
-    init(catches: [FishCatch], onOpen: @escaping (FishCatch) -> Void) {
+    init(catches: [FishCatch], totals: SpeciesCatchTotals?, onOpen: @escaping (FishCatch) -> Void) {
         self.catches = catches
+        self.totals = totals
         self.onOpen = onOpen
     }
 
@@ -22,13 +27,15 @@ struct SpeciesDetailCatchesSection: View {
                 Text("None logged yet.")
                     .foregroundStyle(.secondary)
             } else {
-                LabeledContent("Fish logged", value: "\(totalFish)")
-                LabeledContent("Trips", value: "\(tripCount)")
-                if let longest {
-                    LabeledContent("Longest measured", value: settings.length(longest))
-                }
-                if let heaviest {
-                    LabeledContent("Heaviest measured", value: settings.weight(heaviest))
+                if let totals {
+                    LabeledContent("Fish logged", value: "\(totals.fish)")
+                    LabeledContent("Trips", value: "\(totals.trips)")
+                    if let longest = totals.longestCm {
+                        LabeledContent("Longest measured", value: settings.length(longest))
+                    }
+                    if let heaviest = totals.heaviestKg {
+                        LabeledContent("Heaviest measured", value: settings.weight(heaviest))
+                    }
                 }
                 if let lastCaught {
                     LabeledContent("Last caught", value: lastCaught.formatted(date: .abbreviated, time: .omitted))
@@ -48,7 +55,7 @@ struct SpeciesDetailCatchesSection: View {
         } header: {
             Text("Your catches")
         } footer: {
-            if catches.count > Self.recentLimit {
+            if (totals?.entries ?? 0) > Self.recentLimit {
                 Text("Showing the \(Self.recentLimit) most recent entries.")
             }
         }
@@ -58,23 +65,6 @@ struct SpeciesDetailCatchesSection: View {
 
     private var recentCatches: [FishCatch] {
         Array(catches.prefix(Self.recentLimit))
-    }
-
-    private var totalFish: Int {
-        catches.reduce(0) { $0 + $1.count }
-    }
-
-    private var tripCount: Int {
-        Set(catches.compactMap { $0.trip?.id }).count
-    }
-
-    /// Measured fish only, so a bucketed "trophy" never passes for a record.
-    private var longest: Double? {
-        catches.compactMap { $0.lengthCm }.max()
-    }
-
-    private var heaviest: Double? {
-        catches.compactMap { $0.weightKg }.max()
     }
 
     /// Newest first, so the latest is the first one.

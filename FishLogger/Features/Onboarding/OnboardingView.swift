@@ -11,6 +11,11 @@ struct OnboardingView: View {
     @State private var step: Step = .welcome
     @State private var regions: Set<FishingRegion> = []
     @State private var groups: Set<SpeciesGroup> = []
+    /// Steps swap in place, so nothing tells VoiceOver the screen changed. Focus moves to the new
+    /// step's heading instead of staying on the bottom button, whose label just changed.
+    @AccessibilityFocusState private var headingFocused: Bool
+    /// False until the first move, so the welcome screen opens the way VoiceOver normally starts.
+    @State private var hasMoved = false
 
     enum Step: Int, CaseIterable {
         case welcome, regions, targets, done
@@ -19,11 +24,19 @@ struct OnboardingView: View {
     var body: some View {
         NavigationStack {
             content
+                .task(id: step) { await focusHeading() }
+                // The two-finger scrub goes back a step, like it does on a pushed screen.
+                .accessibilityAction(.escape) {
+                    if step != .welcome { move(by: -1) }
+                }
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
                         if step != .welcome {
-                            Button("Back") { move(by: -1) }
+                            Button { move(by: -1) } label: {
+                                Label("Back", systemImage: "chevron.backward")
+                                    .labelStyle(.titleAndIcon)
+                            }
                         }
                     }
                     ToolbarItem(placement: .topBarTrailing) {
@@ -84,6 +97,8 @@ struct OnboardingView: View {
                     .accessibilityHidden(true)
                 Text("Fish Logger")
                     .font(.largeTitle.bold())
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityFocused($headingFocused)
                 VStack(alignment: .leading, spacing: 18) {
                     point("hand.tap.fill", "Tap a fish to log it. That's the whole job on the water.")
                     point("cloud.sun.fill", "Weather, pressure, and the moon fill in on their own.")
@@ -178,6 +193,7 @@ struct OnboardingView: View {
             Text(title)
                 .font(.title.bold())
                 .accessibilityAddTraits(.isHeader)
+                .accessibilityFocused($headingFocused)
             Text(detail)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -198,8 +214,19 @@ struct OnboardingView: View {
         }
     }
 
+    /// Waits for the step change to finish, so the new heading is on screen before focus moves.
+    /// Only one step shows at a time, so one flag covers every heading.
+    private func focusHeading() async {
+        guard hasMoved else { return }
+        try? await Task.sleep(for: .milliseconds(350))
+        guard !Task.isCancelled else { return }
+        headingFocused = true
+    }
+
     private func move(by offset: Int) {
         guard let next = Step(rawValue: step.rawValue + offset) else { return }
+        hasMoved = true
+        headingFocused = false
         if reduceMotion {
             step = next
         } else {

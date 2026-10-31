@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Multi-select list of fishing regions, grouped by country, with a "use my location" shortcut.
 /// Used in first-launch setup and in Settings, so it renders as List sections.
@@ -8,6 +9,9 @@ struct RegionPickerSections: View {
     @Environment(AppSettings.self) private var settings
     @State private var isLocating = false
     @State private var locateFailed = false
+    /// The region the last "Use my location" ticked. Its row can be far down the list, so the
+    /// footer says what happened.
+    @State private var addedRegion: FishingRegion?
 
     var body: some View {
         Section {
@@ -24,8 +28,10 @@ struct RegionPickerSections: View {
             }
             .disabled(isLocating)
         } footer: {
-            if locateFailed {
-                Text("Couldn't tell where you are. Pick from the list instead.")
+            if let addedRegion, selection.contains(addedRegion) {
+                Text("Added \(addedRegion.label). It's ticked in the list below.")
+            } else if locateFailed {
+                Text(Self.failedMessage)
             }
         }
 
@@ -64,16 +70,23 @@ struct RegionPickerSections: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
+    private static let failedMessage = "Couldn't tell where you are. Pick from the list instead."
+
     private func useMyLocation() async {
         isLocating = true
         locateFailed = false
+        addedRegion = nil
         let region = await LocationService.shared.currentRegion()
         isLocating = false
         if let region {
             selection.insert(region)
+            addedRegion = region
+            // Focus stays on the button, so VoiceOver users hear which row was ticked.
+            UIAccessibility.post(notification: .announcement, argument: "Added \(region.label).")
         } else {
             Haptics.warning()
             locateFailed = true
+            UIAccessibility.post(notification: .announcement, argument: Self.failedMessage)
         }
     }
 }

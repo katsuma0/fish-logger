@@ -18,6 +18,9 @@ struct TripDetailView: View {
     /// Worked out when Delete is tapped, so a render never counts every photo on the trip.
     @State private var deleteMessage = ""
     @State private var confirmingEnd = false
+    /// Worked out when End trip is tapped, so the dialog and the end time agree. Nil ends the trip now.
+    @State private var endDateForStaleTrip: Date? = nil
+    @State private var endMessage: String? = nil
     @State private var pendingCatchDelete: TripDetailCatchDeleteRequest? = nil
     /// A catch just added from the species list. Its editor opens once the list has closed, so the time
     /// and size can be set straight away.
@@ -25,6 +28,9 @@ struct TripDetailView: View {
     @State private var showingMap = false
     /// Set before deleting so the body stops reading the trip on the way out.
     @State private var didDelete = false
+    /// Today's Keep going answer, so End trip here treats a forgotten trip the way Today's card does.
+    @AppStorage("todayKeptGoingTripID") private var keptGoingTripID = ""
+    @AppStorage("todayKeptGoingAt") private var keptGoingAt: Double = 0
 
     init(trip: Trip) {
         self.trip = trip
@@ -68,7 +74,7 @@ struct TripDetailView: View {
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if trip.isActive {
-                    Button("End trip") { confirmingEnd = true }
+                    Button("End trip") { askToEnd() }
                 }
                 Button("Edit") { activeSheet = .editTrip }
             }
@@ -85,6 +91,10 @@ struct TripDetailView: View {
         .confirmationDialog("End this trip?", isPresented: $confirmingEnd, titleVisibility: .visible) {
             Button("End trip") { endTrip() }
             Button("Cancel", role: .cancel) {}
+        } message: {
+            if let endMessage {
+                Text(endMessage)
+            }
         }
         .confirmationDialog(
             "Delete this catch?",
@@ -331,7 +341,7 @@ struct TripDetailView: View {
         weatherMessage = nil
         let context = modelContext
         Task {
-            await TripConditionsUpdater.refresh(trip, in: context, forceWeather: true)
+            await fillEmptyWeather(in: context)
             isFetchingWeather = false
             guard !didDelete, !trip.historyIsGone else { return }
             if hasWeather {
@@ -340,6 +350,24 @@ struct TripDetailView: View {
                 weatherMessage = "Could not get the weather. Check the connection and try again."
             }
         }
+    }
+
+    /// Fills only the weather fields that are empty. This button shows while cloud cover, rain, wind
+    /// direction or the trend may still hold values typed under Edit, and those stay. Get weather in the
+    /// editor is the one that replaces them, and its footer says so.
+    private func fillEmptyWeather(in context: ModelContext) async {
+        if trip.coordinate == nil {
+            // An open trip with no spot yet: this finds one. Any weather it fetches only fills empty fields.
+            await TripConditionsUpdater.refresh(trip, in: context)
+            guard !didDelete, !trip.historyIsGone, !hasWeather else { return }
+        }
+        guard let latitude = trip.latitude, let longitude = trip.longitude,
+              let snapshot = try? await WeatherService.fetch(latitude: latitude, longitude: longitude, at: trip.startDate)
+        else { return }
+        guard !didDelete, !trip.historyIsGone else { return }
+        WeatherService.apply(snapshot, to: trip, overwrite: false)
+        // Names the spot, fills sun and moon, and saves. The weather is already in, so it is not fetched again.
+        await TripConditionsUpdater.refresh(trip, in: context)
     }
 
     private func addCatch(_ species: Species) {
@@ -374,8 +402,25 @@ struct TripDetailView: View {
         Haptics.warning()
     }
 
+    /// A trip that looks forgotten, by the same rule as Today's card, ends at its last fish (or its start
+    /// when it has none), whichever End button is used. Ending it now would count days nobody fished.
+    private func askToEnd() {
+        let keptGoing = keptGoingTripID == trip.id.uuidString ? Date(timeIntervalSince1970: keptGoingAt) : nil
+        if TodayStaleTripCard.isStale(trip, keptGoingAt: keptGoing) {
+            let date = TodayStaleTripCard.endDate(for: trip)
+            endDateForStaleTrip = date
+            endMessage = TripDetailEndText.message(endingAt: date, atLastFish: !trip.catches.isEmpty)
+        } else {
+            endDateForStaleTrip = nil
+            endMessage = nil
+        }
+        confirmingEnd = true
+    }
+
     private func endTrip() {
-        CatchLogger.endTrip(trip, in: modelContext)
+        guard !didDelete, !trip.historyIsGone, trip.isActive else { return }
+        CatchLogger.endTrip(trip, in: modelContext, at: endDateForStaleTrip ?? .now)
+        endDateForStaleTrip = nil
         Haptics.tap()
     }
 
@@ -408,6 +453,17 @@ private struct TripDetailSheet: Identifiable {
 
     static func editCatch(_ fishCatch: FishCatch) -> TripDetailSheet {
         TripDetailSheet(id: "editCatch-\(fishCatch.id.uuidString)", kind: .editCatch(fishCatch))
+    }
+}
+
+/// The End trip dialog's note for a trip that ends earlier than now.
+private enum TripDetailEndText {
+    /// "Ends at your last fish, 11:02 AM.", with the day added when it was not today.
+    static func message(endingAt date: Date, atLastFish: Bool, now: Date = .now) -> String {
+        let time = date.formatted(date: .omitted, time: .shortened)
+        let when = Calendar.current.isDate(date, inSameDayAs: now) ? time : "\(HistoryText.dayTitle(date, now: now)) at \(time)"
+        let lead = atLastFish ? "Ends at your last fish, \(when)." : "No fish logged, so it ends at its start time, \(when)."
+        return "\(lead) You can change the time under Edit."
     }
 }
 

@@ -24,6 +24,41 @@ enum CatchLogger {
         return (try? context.fetch(descriptor))?.first
     }
 
+    // MARK: Forgotten trips
+
+    /// No fish, no start, and no Keep going for this long, and an open trip was almost certainly
+    /// left running. Same quiet stretch the Today screen asks about.
+    static let forgottenTripInterval: TimeInterval = 8 * 60 * 60
+
+    /// True for an open trip quiet for 8 hours. Only the quiet test lives here: Today also asks about
+    /// a trip from an earlier day, but nothing here can ask, and splitting at midnight would break an
+    /// overnight session in two.
+    static func isForgotten(_ trip: Trip, now: Date = .now) -> Bool {
+        guard trip.isActive else { return false }
+        var lastActivity = max(lastCatchDate(in: trip) ?? trip.startDate, trip.startDate)
+        if let keptGoing = AppSettings.shared.keptGoingDate(forTripID: trip.id) {
+            lastActivity = max(lastActivity, keptGoing)
+        }
+        return now.timeIntervalSince(lastActivity) > forgottenTripInterval
+    }
+
+    /// The open trip a new fish joins, or nil when logging would start a trip: none is running, or
+    /// the open one looks forgotten. Use this, not `activeTrip`, to word a Log button or to tell
+    /// whether logging is about to start a trip.
+    static func currentTrip(in context: ModelContext, now: Date = .now) -> Trip? {
+        guard let trip = activeTrip(in: context), !isForgotten(trip, now: now) else { return nil }
+        return trip
+    }
+
+    /// Where a forgotten trip ends: at its last fish, or at its start when it has none.
+    static func forgottenTripEndDate(for trip: Trip) -> Date {
+        lastCatchDate(in: trip) ?? trip.startDate
+    }
+
+    static func lastCatchDate(in trip: Trip) -> Date? {
+        trip.catches.map(\.timestamp).max()
+    }
+
     /// Starts a trip right away with whatever is known. Call `TripConditionsUpdater.refresh`
     /// afterwards to fill in GPS, weather, pressure, moon, and sun without blocking the tap.
     @discardableResult
@@ -249,7 +284,7 @@ enum CatchLogger {
         in context: ModelContext,
         at date: Date = .now
     ) -> FishCatch {
-        let trip = targetTrip ?? activeTrip(in: context) ?? startTripLikeLast(in: context, at: date)
+        let trip = targetTrip ?? tripForNewCatch(in: context, at: date) ?? startTripLikeLast(in: context, at: date)
         // A catch added to a finished trip goes at its end, not at today's date.
         let timestamp = trip.endDate.map { min(date, $0) } ?? date
         let fishCatch = FishCatch(
@@ -280,6 +315,16 @@ enum CatchLogger {
         context.insert(fishCatch)
         fishCatch.trip = trip
         return fishCatch
+    }
+
+    /// The open trip a fish logged with no trip given joins. A forgotten one is ended at its last fish
+    /// first, so the new fish starts a new trip, as the Today screen promises. Ending it here rather
+    /// than in `startTrip` matters: that would end it now and stretch it over days.
+    private static func tripForNewCatch(in context: ModelContext, at date: Date) -> Trip? {
+        guard let trip = activeTrip(in: context) else { return nil }
+        guard isForgotten(trip, now: date) else { return trip }
+        endTrip(trip, in: context, at: forgottenTripEndDate(for: trip))
+        return nil
     }
 
     /// A trip started by logging a fish copies the water and method of the last trip, because most
@@ -314,8 +359,10 @@ enum TripConditionsUpdater {
         let settings = AppSettings.shared
 
         if trip.latitude == nil || trip.longitude == nil, trip.isActive {
-            if let location = await LocationService.shared.currentLocation() {
-                guard isLive(trip) else { return }
+            // Check after every wait, even one that came back empty: Undo can delete the trip meanwhile.
+            let location = await LocationService.shared.currentLocation()
+            guard isLive(trip) else { return }
+            if let location {
                 trip.latitude = location.coordinate.latitude
                 trip.longitude = location.coordinate.longitude
             }
@@ -326,10 +373,11 @@ enum TripConditionsUpdater {
             if trip.locationName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 if let saved = CatchLogger.nearbySpotName(to: location, in: context) {
                     trip.locationName = saved
-                } else if let name = await LocationService.shared.placeName(for: location) {
+                } else {
+                    let name = await LocationService.shared.placeName(for: location)
                     guard isLive(trip) else { return }
                     // The person may have typed a name while the geocoder was working.
-                    if trip.locationName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    if let name, trip.locationName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         trip.locationName = name
                     }
                 }
@@ -345,17 +393,20 @@ enum TripConditionsUpdater {
             trip.moonPhase = Astronomy.moon(on: trip.startDate).phase
         }
 
-        if settings.useBarometer, trip.isActive, trip.pressureHPa == nil,
-           let station = await BarometerService.shared.readOnce() {
+        if settings.useBarometer, trip.isActive, trip.pressureHPa == nil {
+            let reading = await BarometerService.shared.readOnce()
             guard isLive(trip) else { return }
-            let altitude = LocationService.shared.recentLocation()?.altitude ?? 0
-            trip.pressureHPa = BarometerService.seaLevel(stationHPa: station, altitudeM: altitude, airTempC: trip.airTempC ?? 15)
+            if let station = reading {
+                let altitude = LocationService.shared.recentLocation()?.altitude ?? 0
+                trip.pressureHPa = BarometerService.seaLevel(stationHPa: station, altitudeM: altitude, airTempC: trip.airTempC ?? 15)
+            }
         }
 
         let wantsWeather = forceWeather || (settings.autoFetchWeather && trip.weatherFetchedAt == nil)
         if wantsWeather, let latitude = trip.latitude, let longitude = trip.longitude {
-            if let snapshot = try? await WeatherService.fetch(latitude: latitude, longitude: longitude, at: trip.startDate) {
-                guard isLive(trip) else { return }
+            let snapshot = try? await WeatherService.fetch(latitude: latitude, longitude: longitude, at: trip.startDate)
+            guard isLive(trip) else { return }
+            if let snapshot {
                 WeatherService.apply(snapshot, to: trip, overwrite: forceWeather)
             }
         }

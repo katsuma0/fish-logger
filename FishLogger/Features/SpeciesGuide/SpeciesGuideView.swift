@@ -32,12 +32,22 @@ struct SpeciesGuideView: View {
     /// Fish per species id. Filled on appear from a two-field fetch rather than a live query, so
     /// typing in search, or logging on another tab, never walks the whole log here.
     @State private var tally: [String: Int] = [:]
+    /// Whether anything was saved since the tally was counted, so popping a species page or coming
+    /// back to the tab with nothing new costs no fetch.
+    @State private var tallyFreshness = SpeciesTallyFreshness()
     @State private var query = ""
     /// Nil until the person picks one, so the default follows their regions.
     @State private var pickedFilter: SpeciesGuideFilter?
     @State private var showingIdentify = false
     /// A catch logged through Photo ID from this tab, shown in the toast with Undo.
     @State private var loggedCatch: FishCatch?
+    /// The running trip when Photo ID was opened, so a trip that logging then started can be told apart.
+    @State private var tripIDAtIdentify: UUID?
+    /// The last catch logged from here and the trip that logging started, if it started one. Undo
+    /// then takes the empty trip away too, same as on a species page. Ids, not models, because
+    /// reading a deleted model can crash.
+    @State private var lastLoggedID: UUID?
+    @State private var startedTripID: UUID?
 
     var body: some View {
         // Read once per render and passed down, so rows never go back to settings.
@@ -83,6 +93,7 @@ struct SpeciesGuideView: View {
                 // On the thumb side, same as the camera on Today.
                 ToolbarItem(placement: settings.leftHanded ? ToolbarItemPlacement.topBarLeading : ToolbarItemPlacement.topBarTrailing) {
                     Button {
+                        tripIDAtIdentify = CatchLogger.activeTrip(in: modelContext)?.id
                         showingIdentify = true
                     } label: {
                         Label("Photo ID", systemImage: "camera")
@@ -92,13 +103,21 @@ struct SpeciesGuideView: View {
             }
             .sheet(isPresented: $showingIdentify) {
                 IdentifyView(onLogged: { fishCatch in
-                    loggedCatch = fishCatch
+                    photoIDLogged(fishCatch)
                 })
             }
-            // Also runs when a species page is popped, where a fish may just have been logged.
-            .onAppear { refreshTally() }
-            // A catch from Photo ID adds to the tally; Undo in the toast takes it away again.
-            .onChange(of: loggedCatch == nil) { refreshTally() }
+            // Also runs when a species page is popped, where a fish may just have been logged. Only
+            // counts again when something was saved meanwhile.
+            .onAppear { refreshTallyIfStale() }
+            // A catch from Photo ID adds to the tally; Undo in the toast takes it away again. The
+            // list stays on screen behind the Photo ID sheet, so appear does not cover these.
+            .onChange(of: loggedCatch == nil) { _, hidden in
+                // Timed out or closed with the catch still there: the tally already has it. A save
+                // made meanwhile, such as the photo being attached, is counted on the next appear.
+                if !hidden || toastHidden() {
+                    refreshTally()
+                }
+            }
             .loggedToast($loggedCatch)
         }
     }
@@ -207,15 +226,68 @@ struct SpeciesGuideView: View {
         }
     }
 
+    // MARK: Photo ID
+
+    /// Notes whether this log started a trip. Photo ID logs with no question asked, so a trip it
+    /// starts here gets its conditions filled in, and Undo takes it away again.
+    private func photoIDLogged(_ fishCatch: FishCatch) {
+        // A trip started by logging gets the catch's own time as its start. One that was already
+        // running, or one started by hand while the sheet was open, starts earlier.
+        if let trip = fishCatch.trip, trip.isActive, trip.id != tripIDAtIdentify,
+           trip.startDate == fishCatch.timestamp {
+            startedTripID = trip.id
+            // Same as a species page: GPS, weather, and moon fill in without blocking the tap.
+            let context = modelContext
+            Task {
+                await TripConditionsUpdater.refresh(trip, in: context)
+            }
+        } else {
+            startedTripID = nil
+        }
+        lastLoggedID = fishCatch.id
+        // The toast reads itself out for VoiceOver and offers Undo.
+        loggedCatch = fishCatch
+    }
+
+    /// Runs when the toast goes away, whether it timed out or Undo was tapped, and returns true after
+    /// an Undo. A trip that this log started, and that now holds nothing, is removed too, which also
+    /// stops GPS and the barometer.
+    private func toastHidden() -> Bool {
+        guard let loggedID = lastLoggedID else { return false }
+        let startedID = startedTripID
+        lastLoggedID = nil
+        startedTripID = nil
+        let stillLogged = FetchDescriptor<FishCatch>(predicate: #Predicate<FishCatch> { $0.id == loggedID })
+        // Timed out or closed: the catch is still there, so the trip stays.
+        guard ((try? modelContext.fetchCount(stillLogged)) ?? 1) == 0 else { return false }
+        guard let tripID = startedID else { return true }
+        // Fetched again by id, so a trip the toast's Undo already removed is never read.
+        var descriptor = FetchDescriptor<Trip>(predicate: #Predicate<Trip> { $0.id == tripID })
+        descriptor.fetchLimit = 1
+        if let trip = (try? modelContext.fetch(descriptor))?.first, !trip.isDeleted,
+           !trip.catches.contains(where: { !$0.isDeleted && $0.modelContext != nil }) {
+            CatchLogger.delete(trip, in: modelContext)
+        }
+        return true
+    }
+
     // MARK: Data
 
     private var trimmedQuery: String {
         query.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Counts again only after a save, or while the context holds edits not saved yet.
+    private func refreshTallyIfStale() {
+        guard tallyFreshness.isStale || modelContext.hasChanges else { return }
+        refreshTally()
+    }
+
     /// Fish per species id, counting multi-fish entries. Two fields per catch, so a long log does not
     /// pull notes, conditions, or photos into memory.
     private func refreshTally() {
+        // Cleared before the fetch, so a save that lands while counting marks it stale again.
+        tallyFreshness.isStale = false
         var descriptor = FetchDescriptor<FishCatch>()
         descriptor.propertiesToFetch = [\.speciesID, \.count]
         let catches = (try? modelContext.fetch(descriptor)) ?? []
@@ -287,6 +359,29 @@ struct SpeciesGuideView: View {
             sections.append(SpeciesGuideSection(id: entry.group.id, title: entry.group.label, species: entry.species))
         }
         return sections
+    }
+}
+
+/// Set to stale straight from every save, before the next appear or toast change reads it. A plain
+/// class rather than view state, so a save never redraws the guide by itself.
+private final class SpeciesTallyFreshness {
+    var isStale = true
+    private var observer: NSObjectProtocol?
+
+    init() {
+        observer = NotificationCenter.default.addObserver(
+            forName: ModelContext.didSave,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            self?.isStale = true
+        }
+    }
+
+    deinit {
+        if let observer {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 }
 

@@ -7,6 +7,8 @@ import UIKit
 private enum IdentifyRoute: Hashable {
     case checklist
     case confirm(speciesID: String, source: IdentificationSource)
+    /// The Photo ID settings page, pushed here so a key can be added or fixed without losing the photo.
+    case photoIDSettings
 }
 
 /// Which engine looks at the photo.
@@ -110,6 +112,11 @@ struct IdentifyView: View {
             guard let newItem else { return }
             loadPhoto(from: newItem)
         }
+        .onChange(of: path) { oldPath, newPath in
+            if oldPath.contains(.photoIDSettings), !newPath.contains(.photoIDSettings) {
+                returnedFromSettings()
+            }
+        }
         .fullScreenCover(isPresented: $showingCamera) {
             CameraPicker(onCapture: { captured in
                 useImage(captured)
@@ -133,11 +140,12 @@ struct IdentifyView: View {
             if let image {
                 photoSection(image)
                 statusSections
-                if showsSetupNoteSection, let note = setupNote {
+                if showsSetupNoteSection, let setupError {
                     Section {
-                        Label(note, systemImage: "key")
+                        Label(setupError.message, systemImage: "key")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
+                        settingsRow(for: setupError)
                     }
                 }
             } else {
@@ -203,6 +211,9 @@ struct IdentifyView: View {
                 Label("Use the checklist instead", systemImage: "checklist")
                     .frame(minHeight: settings.buttonSize.minTapSize)
             }
+            if keyChecked, let setupError {
+                settingsRow(for: setupError)
+            }
         } footer: {
             if keyChecked, let note = setupNote {
                 Text(note)
@@ -245,6 +256,8 @@ struct IdentifyView: View {
             Image(uiImage: displayImage)
                 .resizable()
                 .scaledToFit()
+                // Colour is half of an ID, so Smart Invert must not flip the photo.
+                .accessibilityIgnoresInvertColors()
                 .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
                 .frame(maxWidth: .infinity, maxHeight: 280)
                 .accessibilityLabel("Your photo")
@@ -287,8 +300,14 @@ struct IdentifyView: View {
             Section {
                 Label(error.message, systemImage: "exclamationmark.triangle.fill")
                     .fixedSize(horizontal: false, vertical: true)
-                actionRow("Try again", systemImage: "arrow.clockwise") {
-                    start(lastEngine)
+                // Only where a second send can work. A bad key or a refused photo fails the same way again.
+                if error.isRetryable {
+                    actionRow("Try again", systemImage: "arrow.clockwise") {
+                        start(lastEngine)
+                    }
+                }
+                if error.needsSetup {
+                    settingsRow(for: error)
                 }
                 if lastEngine == .claude, OnDeviceIdentifier.isAvailable {
                     actionRow("Use the on-device model", systemImage: "iphone") {
@@ -314,6 +333,9 @@ struct IdentifyView: View {
                 .buttonStyle(PrimaryActionButtonStyle())
                 .modifier(IdentifyClearRow())
                 pickFromListRow
+                if let setupError {
+                    settingsRow(for: setupError)
+                }
             }
         }
     }
@@ -410,6 +432,23 @@ struct IdentifyView: View {
         }
     }
 
+    /// Opens the Photo ID settings page on top of this screen, so the photo is still here after the
+    /// key is fixed.
+    private func settingsRow(for error: IdentificationError) -> some View {
+        actionRow(settingsRowTitle(for: error), systemImage: "key") {
+            path.append(.photoIDSettings)
+        }
+    }
+
+    private func settingsRowTitle(for error: IdentificationError) -> String {
+        switch error {
+        case .notConfigured: return "Add your API key"
+        case .photoIDDisabled: return "Turn on Photo ID"
+        case .invalidAPIKey: return "Check your API key"
+        default: return "Open Photo ID settings"
+        }
+    }
+
     // MARK: Destinations
 
     @ViewBuilder
@@ -433,6 +472,8 @@ struct IdentifyView: View {
                     log(speciesID: speciesID, source: source, sizeClass: sizeClass, count: count)
                 }
             )
+        case .photoIDSettings:
+            SettingsPhotoIDView()
         }
     }
 
@@ -440,22 +481,49 @@ struct IdentifyView: View {
 
     private var claudeReady: Bool { settings.photoIDEnabled && hasAPIKey }
 
-    private var setupNote: String? {
-        if !hasAPIKey { return IdentificationError.notConfigured.message }
-        if !settings.photoIDEnabled { return IdentificationError.photoIDDisabled.message }
+    /// What stops Claude from running, if anything. Both are fixed on the Photo ID settings page.
+    private var setupError: IdentificationError? {
+        if !hasAPIKey { return .notConfigured }
+        if !settings.photoIDEnabled { return .photoIDDisabled }
         return nil
     }
 
-    /// The needs-checklist section already says it, so the separate note would repeat it.
+    private var setupNote: String? { setupError?.message }
+
+    /// The needs-checklist section, or a failure that already offers the settings page, says it
+    /// already, so the separate note would repeat it.
     private var showsSetupNoteSection: Bool {
         guard keyChecked, !claudeReady else { return false }
-        if case .needsChecklist = phase { return false }
-        return true
+        switch phase {
+        case .needsChecklist:
+            return false
+        case .failed(let error):
+            return !error.needsSetup
+        case .idle, .running, .finished:
+            return true
+        }
     }
 
     private func refreshKeyState() {
         hasAPIKey = KeychainStore.hasValue(for: .anthropicAPIKey)
         keyChecked = true
+    }
+
+    /// Back from the Photo ID settings page. A failed or waiting photo starts over so a fixed key
+    /// shows the Identify button again. Never sends the photo itself: with Claude ready,
+    /// `startAutomaticEngines` returns at once and the screen waits for a tap. Results that are
+    /// already showing stay, and an on-device result picks up "Identify with Claude" from the new key.
+    private func returnedFromSettings() {
+        refreshKeyState()
+        guard image != nil else { return }
+        switch phase {
+        case .failed, .needsChecklist, .idle:
+            cancelRun()
+            phase = .idle
+            startAutomaticEngines()
+        case .running, .finished:
+            break
+        }
     }
 
     // MARK: Actions
@@ -568,6 +636,7 @@ struct IdentifyView: View {
                 refreshKeyState()
                 let error: IdentificationError = hasAPIKey ? .photoIDDisabled : .notConfigured
                 phase = .failed(error)
+                announce(.failed(error))
                 return
             }
             apiKey = saved
@@ -575,14 +644,38 @@ struct IdentifyView: View {
         let model = settings.claudeModel
         let regions = settings.homeRegions
         phase = .running(engine.progressMessage)
+        // The button that was tapped is gone, so say the work has started.
+        IdentifyAnnouncement.post(engine.progressMessage)
 
         runTask = Task {
             let outcome = await Self.identify(image, engine: engine, apiKey: apiKey, model: model, regions: regions)
             // A cancelled or superseded run leaves the screen as the newer action set it.
             guard let outcome, !Task.isCancelled, id == runID else { return }
             phase = outcome
+            announce(outcome)
             if case .failed = outcome { Haptics.warning() }
         }
+    }
+
+    /// The results replace the loading row without moving VoiceOver focus, so the outcome is spoken.
+    private func announce(_ outcome: IdentifyPhase) {
+        switch outcome {
+        case .finished(let result):
+            IdentifyAnnouncement.post(Self.spokenSummary(of: result))
+        case .failed(let error):
+            IdentifyAnnouncement.post(error.message)
+        case .idle, .running, .needsChecklist:
+            break
+        }
+    }
+
+    /// "3 matches. Best: Walleye, 82%." VoiceOver reads the sign as "percent".
+    private static func spokenSummary(of result: IdentificationResult) -> String {
+        guard result.isFish else { return "That does not look like a fish." }
+        guard let best = result.best else { return "No clear match." }
+        let count = result.candidates.count
+        let matches = count == 1 ? "1 match" : "\(count) matches"
+        return "\(matches). Best: \(best.species.commonName), \(best.percentText)."
     }
 
     /// Nil when the run was cancelled.

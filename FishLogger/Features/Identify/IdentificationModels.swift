@@ -85,4 +85,29 @@ enum IdentificationError: LocalizedError, Equatable {
     }
 
     var errorDescription: String? { message }
+
+    /// Sending the same photo again can work. A bad key, a refusal, or a missing model fails the same
+    /// way every time, and a refused photo would only be sent and billed again.
+    var isRetryable: Bool {
+        switch self {
+        case .rateLimited, .busy, .offline, .badResponse, .failed:
+            return true
+        case .api(let statusCode, _):
+            return statusCode >= 500
+        default:
+            return false
+        }
+    }
+
+    /// Fixed on the Photo ID settings page: the switch, the key, or the model name.
+    var needsSetup: Bool {
+        switch self {
+        case .notConfigured, .photoIDDisabled, .invalidAPIKey:
+            return true
+        case .api(let statusCode, _):
+            return (400..<500).contains(statusCode)
+        default:
+            return false
+        }
+    }
 }

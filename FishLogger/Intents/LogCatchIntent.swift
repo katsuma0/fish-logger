@@ -28,14 +28,15 @@ struct LogCatchIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let context = AppModelContainer.shared.mainContext
-        let hadTrip = CatchLogger.activeTrip(in: context) != nil
+        // A forgotten trip gets closed by logCatch, so compare against the trip that was current.
+        let tripBefore = CatchLogger.currentTrip(in: context)
         let fishCatch = CatchLogger.logCatch(
             speciesID: species.id,
             count: count,
             sizeClass: size?.sizeClass,
             in: context
         )
-        if !hadTrip, let trip = fishCatch.trip {
+        if let trip = fishCatch.trip, trip.id != tripBefore?.id {
             // Conditions fill in after the reply, so Siri answers right away.
             Task {
                 await TripConditionsUpdater.refresh(trip, in: context)

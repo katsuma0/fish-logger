@@ -91,6 +91,7 @@ struct IdentifyConfirmView: View {
                 Image(uiImage: photo)
                     .resizable()
                     .scaledToFill()
+                    .accessibilityIgnoresInvertColors()
                     .frame(width: 72, height: 72)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .accessibilityHidden(true)

@@ -34,8 +34,8 @@ struct StatsTripRecord: Sendable {
         self.weather = weather
     }
 
-    /// Reads the model, so call it on the main actor.
-    @MainActor
+    /// Reads the model, so call it on the thread that owns the trip's context. Stats makes the
+    /// copy on a background context of its own, tests make it on the main one.
     init(_ trip: Trip) {
         self.init(
             id: trip.id,
@@ -89,9 +89,8 @@ struct StatsCatchRecord: Sendable {
         self.lure = lure
     }
 
-    /// Reads the model, so call it on the main actor. `tripID` is passed in because the caller
-    /// already knows it, which saves a relationship read per catch.
-    @MainActor
+    /// Reads the model, so call it on the thread that owns the catch's context. `tripID` is
+    /// passed in because the caller already knows it, which saves a relationship read per catch.
     init(_ fishCatch: FishCatch, tripID: UUID?) {
         self.init(
             id: fishCatch.id,
@@ -144,7 +143,8 @@ struct StatsDataVersion: Hashable {
     var edits: Int
 }
 
-/// The fetches behind the Stats screen. Main actor because they read models.
+/// The fetches behind the Stats screen. The cheap ones run on the main actor with the view's
+/// context. The full copy is nonisolated so Stats can run it off the main thread.
 @MainActor
 enum StatsStore {
     /// Two counts and one single-row fetch. Fast enough to run on every save.
@@ -162,7 +162,11 @@ enum StatsStore {
     /// to trips by identity rather than through `trip.catches`, which would fault once per trip.
     /// Stats reads most fields of both, so these are full fetches. Only runs when the data
     /// version changes, never per render.
-    static func input(in context: ModelContext) -> StatsInput {
+    ///
+    /// Nonisolated because a long log means thousands of model reads. Stats calls it inside a
+    /// detached task on a context made there, so none of that lands on the main thread. Call it
+    /// on the thread that owns `context`.
+    nonisolated static func input(in context: ModelContext) -> StatsInput {
         let tripModels = (try? context.fetch(FetchDescriptor<Trip>())) ?? []
         let catchModels = (try? context.fetch(FetchDescriptor<FishCatch>())) ?? []
 

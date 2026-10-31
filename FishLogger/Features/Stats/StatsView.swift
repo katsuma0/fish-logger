@@ -3,9 +3,9 @@ import SwiftData
 import SwiftUI
 import UIKit
 
-/// Stats tab root. The numbers are worked out off the main thread into `snapshot` whenever the
-/// filters or the log change, never in `body`, so scrolling, filtering, and logging on other tabs
-/// stay smooth however long the log gets.
+/// Stats tab root. The log is copied and the numbers worked out off the main thread into
+/// `snapshot` whenever the filters or the log change, never in `body`, so switching to the tab,
+/// scrolling, filtering, and logging on other tabs stay smooth however long the log gets.
 struct StatsView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(\.modelContext) private var modelContext
@@ -264,8 +264,16 @@ struct StatsView: View {
         }
     }
 
-    /// The editor writes straight to the model, so count it as an edit even if nothing was saved yet.
+    /// The editor writes straight to the model and can leave edits waiting for autosave. The log
+    /// is copied on a background context, which only sees saved rows, so those edits are saved
+    /// here. That save's notification then brings the numbers up to date through `modelSaved()`,
+    /// so they are worked out once rather than twice.
     private func catchEditorClosed() {
+        if modelContext.hasChanges {
+            CatchLogger.save(modelContext)
+            if !modelContext.hasChanges { return }
+        }
+        // Nothing left to save, or the save failed and no notification is coming.
         refreshDataVersion(afterSave: true)
     }
 
@@ -299,22 +307,17 @@ struct StatsView: View {
         }
     }
 
-    /// Copies the log once per data version on the main actor, then works out the numbers on a
-    /// background thread. A newer key cancels this run, and a cancelled run never touches the screen.
+    /// Copies the log once per data version, then works out the numbers, both on background
+    /// threads, so the main actor only compares versions and shows the result. A newer key cancels
+    /// this run, and a cancelled run never touches the screen.
     private func recompute() async {
         let key = statsKey
         guard let version = key.version else { return }
         // Coming back to the tab restarts this task with the same key. Nothing to do then.
         if snapshot != nil, cache.shownKey == key { return }
 
-        let input: StatsInput
-        if let cached = cache.input, cache.inputVersion == version {
-            input = cached
-        } else {
-            input = StatsStore.input(in: modelContext)
-            cache.input = input
-            cache.inputVersion = version
-        }
+        let input = await logCopy(for: version).value
+        guard !Task.isCancelled else { return }
 
         let range = key.range
         let speciesID = key.speciesID
@@ -340,6 +343,24 @@ struct StatsView: View {
             self.speciesFilter = nil
         }
         renderMenuIcons(for: next.loggedSpeciesIDs)
+    }
+
+    /// The copy of the log for this data version. Filter changes, and a run restarted by coming
+    /// back to the tab, share one copy, even one still being made.
+    private func logCopy(for version: StatsDataVersion) -> Task<StatsInput, Never> {
+        if let copy = cache.logCopy, cache.logCopyVersion == version {
+            return copy
+        }
+        // The environment's container, not AppModelContainer.shared, so previews and tests read
+        // their own store. The context is made and used inside the task, so every model read
+        // stays on that one background thread.
+        let container = modelContext.container
+        let copy: Task<StatsInput, Never> = Task.detached(priority: .userInitiated) {
+            StatsStore.input(in: ModelContext(container))
+        }
+        cache.logCopy = copy
+        cache.logCopyVersion = version
+        return copy
     }
 
     private func renderMenuIcons(for speciesIDs: [String]) {
@@ -369,9 +390,10 @@ private struct StatsKey: Hashable {
 
 /// Bookkeeping that never changes what is drawn. A class, so writing to it does not redraw the view.
 private final class StatsCache {
-    /// The last copy of the log, reused when only the filters change.
-    var input: StatsInput?
-    var inputVersion: StatsDataVersion?
+    /// The latest copy of the log, finished or still being made, reused when only the filters
+    /// change.
+    var logCopy: Task<StatsInput, Never>?
+    var logCopyVersion: StatsDataVersion?
     /// The key of the snapshot on screen.
     var shownKey: StatsKey?
     var isVisible = false

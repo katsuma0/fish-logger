@@ -104,23 +104,32 @@ struct SettingsDataSection: View {
         if exportFailed {
             return "Could not write the export file. Try again."
         }
-        return "One row per catch, with the trip's place and conditions on every row. Opens in Numbers, Excel, or Google Sheets."
+        return "One row per catch, with the trip's place, conditions, and notes on every row. Opens in Numbers, Excel, or Google Sheets."
     }
 
-    /// Copies plain values out of the models here, where they live, then builds and writes the
-    /// file in a detached task so a long log never holds up the screen.
+    /// The fetch, the copy out of the models, and the file all happen in a detached task on its own
+    /// context, so a season of catches never holds up the screen. The main actor only saves,
+    /// flips `isExporting`, and shows the file.
     private func export() {
         guard !isExporting else { return }
         isExporting = true
         exportFailed = false
-        let context = modelContext
+        // A background context only sees saved rows, so edits still waiting for autosave go first.
+        if modelContext.hasChanges {
+            CatchLogger.save(modelContext)
+        }
+        // The environment's container, not AppModelContainer.shared, so previews and tests export
+        // their own store.
+        let container = modelContext.container
+        let now = Date.now
         Task {
-            let descriptor = FetchDescriptor<Trip>(sortBy: [SortDescriptor(\.startDate)])
-            let trips = (try? context.fetch(descriptor)) ?? []
-            let records = CSVExporter.records(from: trips)
-            let now = Date.now
             let written = Task.detached(priority: .userInitiated) { () -> URL? in
-                try? CSVExporter.writeFile(records: records, on: now)
+                let context = ModelContext(container)
+                var descriptor = FetchDescriptor<Trip>(sortBy: [SortDescriptor(\.startDate)])
+                descriptor.relationshipKeyPathsForPrefetching = [\.catches]
+                let trips = (try? context.fetch(descriptor)) ?? []
+                let records = CSVExporter.records(from: trips)
+                return try? CSVExporter.writeFile(records: records, on: now)
             }
             let url = await written.value
             isExporting = false

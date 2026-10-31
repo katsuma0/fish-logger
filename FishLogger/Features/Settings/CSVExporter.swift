@@ -1,9 +1,10 @@
 import Foundation
 
-/// Flat CSV of the whole log, one row per catch, for spreadsheets and backups.
-/// Built in two steps so the slow part can leave the main thread: `records(from:)` copies plain
-/// values out of the SwiftData models on the main actor, then `csv(records:)` and
-/// `writeFile(records:on:)` turn them into a file on any thread.
+/// Flat CSV of the whole log, one row per catch, for spreadsheets and backups. Every field the
+/// person types or picks is in it, because Settings suggests exporting before Delete everything.
+/// Built in two steps: `records(from:)` copies plain values out of the SwiftData models on the
+/// thread that owns their context, then `csv(records:)` and `writeFile(records:on:)` turn them
+/// into a file on any thread. Settings does both in a background task on its own context.
 enum CSVExporter {
     /// One trip as plain values, with its catches oldest first.
     struct TripRecord: Sendable {
@@ -22,6 +23,12 @@ enum CSVExporter {
         let windSpeedKmh: Double?
         let windDirectionDeg: Double?
         let moonPhase: Double?
+        let cloudCoverPct: Double?
+        let precipitationMm: Double?
+        let humidityPct: Double?
+        let waterClarity: String
+        let waterLevel: String
+        let notes: String
         let catches: [CatchRecord]
     }
 
@@ -38,6 +45,8 @@ enum CSVExporter {
         let released: Bool
         let lure: String
         let depthM: Double?
+        let waterTempC: Double?
+        let identifiedBy: String
         let latitude: Double?
         let longitude: Double?
         let pressureHPa: Double?
@@ -47,22 +56,23 @@ enum CSVExporter {
     static let tripColumns = [
         "trip_start", "trip_end", "location", "trip_latitude", "trip_longitude", "water_body", "method",
         "weather", "air_temp_c", "water_temp_c", "pressure_hpa", "pressure_trend", "wind_kmh",
-        "wind_dir_deg", "moon_phase"
+        "wind_dir_deg", "moon_phase", "cloud_cover_pct", "precip_mm", "humidity_pct", "water_clarity",
+        "water_level", "trip_notes"
     ]
 
     static let catchColumns = [
         "catch_time", "species_id", "species_name", "scientific_name", "count", "size_class", "length_cm",
-        "weight_kg", "released", "lure", "depth_m", "catch_latitude", "catch_longitude",
-        "catch_pressure_hpa", "notes"
+        "weight_kg", "released", "lure", "depth_m", "catch_water_temp_c", "identified_by",
+        "catch_latitude", "catch_longitude", "catch_pressure_hpa", "notes"
     ]
 
     static var columns: [String] { tripColumns + catchColumns }
 
     // MARK: Copying out of the models
 
-    /// Trips by start date, catches by time. Only reads the models, so it is quick, but it has to
-    /// run where the models live.
-    @MainActor
+    /// Trips by start date, catches by time. Only reads the models, so it can run off the main
+    /// thread, but it has to run on the thread that owns the trips' context: the main actor for
+    /// the main context, or the background task that made its own `ModelContext`.
     static func records(from trips: [Trip]) -> [TripRecord] {
         trips
             .sorted { $0.startDate < $1.startDate }
@@ -86,12 +96,18 @@ enum CSVExporter {
                     windSpeedKmh: trip.windSpeedKmh,
                     windDirectionDeg: trip.windDirectionDeg,
                     moonPhase: trip.moonPhase,
+                    cloudCoverPct: trip.cloudCoverPct,
+                    precipitationMm: trip.precipitationMm,
+                    humidityPct: trip.humidityPct,
+                    waterClarity: trip.waterClarity?.label ?? "",
+                    waterLevel: trip.waterLevel?.label ?? "",
+                    notes: trip.notes,
                     catches: catches
                 )
             }
     }
 
-    @MainActor
+    /// Same thread rule as `records(from:)`.
     private static func catchRecord(_ fishCatch: FishCatch) -> CatchRecord {
         CatchRecord(
             timestamp: fishCatch.timestamp,
@@ -105,6 +121,8 @@ enum CSVExporter {
             released: fishCatch.released,
             lure: fishCatch.lure,
             depthM: fishCatch.depthM,
+            waterTempC: fishCatch.waterTempC,
+            identifiedBy: fishCatch.identifiedBy?.label ?? "",
             latitude: fishCatch.latitude,
             longitude: fishCatch.longitude,
             pressureHPa: fishCatch.pressureHPa,
@@ -115,7 +133,7 @@ enum CSVExporter {
     // MARK: Building the text
 
     /// Same output as `csv(records:)`, straight from the models. Fine for small logs and tests;
-    /// the Settings export copies records first and builds off the main thread.
+    /// the Settings export fetches, copies, and builds off the main thread.
     @MainActor
     static func csv(trips: [Trip]) -> String {
         csv(records: records(from: trips))
@@ -192,7 +210,13 @@ enum CSVExporter {
             trip.pressureTrend,
             number(trip.windSpeedKmh, digits: 1),
             number(trip.windDirectionDeg, digits: 0),
-            number(trip.moonPhase, digits: 3)
+            number(trip.moonPhase, digits: 3),
+            number(trip.cloudCoverPct, digits: 0),
+            number(trip.precipitationMm, digits: 1),
+            number(trip.humidityPct, digits: 0),
+            trip.waterClarity,
+            trip.waterLevel,
+            trip.notes
         ]
     }
 
@@ -209,6 +233,8 @@ enum CSVExporter {
             fishCatch.released ? "yes" : "no",
             fishCatch.lure,
             number(fishCatch.depthM, digits: 1),
+            number(fishCatch.waterTempC, digits: 1),
+            fishCatch.identifiedBy,
             number(fishCatch.latitude, digits: 6),
             number(fishCatch.longitude, digits: 6),
             number(fishCatch.pressureHPa, digits: 1),

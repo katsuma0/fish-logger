@@ -48,18 +48,19 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
         return lastLocation
     }
 
-    /// One fix, waiting up to `timeout` seconds. Returns the best known location on timeout,
-    /// and nil when permission is missing or nothing is known.
+    /// One fix, waiting up to `timeout` seconds. On timeout or failure it falls back to the cached
+    /// fix only while that is under 10 minutes old. An older one is likely from another spot, and
+    /// would put the wrong lake, sun times, and weather on a trip, so the answer is nil instead.
     func currentLocation(maxAge: TimeInterval = 120, timeout: TimeInterval = 10) async -> CLLocation? {
         if let recent = recentLocation(maxAge: maxAge) { return recent }
         requestPermission()
-        guard !isDenied else { return lastLocation }
+        guard !isDenied else { return recentLocation(maxAge: Self.fallbackMaxAge) }
         if authorizationStatus == .notDetermined {
             // Give the permission prompt a moment before asking for a fix.
             try? await Task.sleep(nanoseconds: 300_000_000)
         }
         let id = UUID()
-        return await withCheckedContinuation { continuation in
+        let location: CLLocation? = await withCheckedContinuation { continuation in
             waiters[id] = continuation
             manager.requestLocation()
             timeouts[id] = Task { @MainActor [weak self] in
@@ -68,7 +69,14 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
                 self?.resumeWaiter(id)
             }
         }
+        // Timeout and failure answer with the cached fix, which can be hours old.
+        guard let location, -location.timestamp.timeIntervalSinceNow <= Self.fallbackMaxAge else { return nil }
+        return location
     }
+
+    /// Oldest cached fix that may stand in when a new one does not come. Same as `recentLocation`'s
+    /// default, which is what starting a trip already accepts.
+    private static let fallbackMaxAge: TimeInterval = 600
 
     /// Keeps the cached fix fresh during a trip so quick logs get a good position.
     func startTracking() {
@@ -95,12 +103,29 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
     }
 
     /// Fishing region for where the phone is now. Needs a fix and a network connection; nil otherwise.
+    /// When permission has not been asked yet, it waits for the answer first, so the time spent
+    /// reading the prompt does not use up the time allowed for a fix.
     func currentRegion() async -> FishingRegion? {
-        guard let location = await currentLocation(timeout: 8) else { return nil }
+        if authorizationStatus == .notDetermined {
+            requestPermission()
+            await waitForPermissionAnswer()
+        }
+        guard isAuthorized, !Task.isCancelled else { return nil }
+        // Long enough for a first fix from a cold start, which can take a while indoors.
+        guard let location = await currentLocation(timeout: 15) else { return nil }
         guard let placemark = try? await CLGeocoder().reverseGeocodeLocation(location).first,
               let area = placemark.administrativeArea
         else { return nil }
         return FishingRegion.from(administrativeArea: area)
+    }
+
+    /// Returns once the person answers the location prompt, after a minute, or when cancelled.
+    /// The status is set on the main actor by the delegate, so a short poll sees it.
+    private func waitForPermissionAnswer() async {
+        let deadline = Date.now.addingTimeInterval(60)
+        while authorizationStatus == .notDetermined, Date.now < deadline, !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 250_000_000)
+        }
     }
 
     /// Answers every waiter and cancels their timeouts.
