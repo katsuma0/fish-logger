@@ -81,7 +81,8 @@ struct StatsCalculator: Sendable {
     let speciesCount: Int
     /// Each trip capped at `StatsLimits.maxTripHours`.
     let hoursFished: Double
-    let releasedFish: Int
+    /// Different lures that caught fish, spellings folded together as in `topLures`.
+    let lureCount: Int
 
     /// Most caught first.
     let bySpecies: [SpeciesCount]
@@ -144,7 +145,6 @@ struct StatsCalculator: Sendable {
         }
 
         let totalFish = filteredCatches.reduce(0) { $0 + $1.count }
-        let releasedFish = filteredCatches.reduce(0) { $0 + ($1.released ? $1.count : 0) }
         let days = Set(inRange.map { calendar.startOfDay(for: $0.startDate) })
         let caughtSpecies = Set(filteredCatches.map(\.speciesID)).filter { $0 != SpeciesCatalog.unknownID }
 
@@ -156,7 +156,6 @@ struct StatsCalculator: Sendable {
         self.catches = filteredCatches
         self.facts = facts
         self.totalFish = totalFish
-        self.releasedFish = releasedFish
         self.tripCount = inRange.count
         self.daysFished = days.count
         self.speciesCount = caughtSpecies.count
@@ -167,7 +166,9 @@ struct StatsCalculator: Sendable {
         self.sizeClassCounts = StatsCalculator.sizeCounts(filteredCatches)
         self.personalBests = StatsCalculator.bests(filteredCatches)
         self.topSpots = StatsCalculator.spots(facts)
-        self.topLures = StatsCalculator.lures(filteredCatches)
+        let lures = StatsCalculator.lures(filteredCatches)
+        self.topLures = Array(lures.prefix(StatsLimits.topListLimit))
+        self.lureCount = lures.count
     }
 
     init(
@@ -198,27 +199,6 @@ struct StatsCalculator: Sendable {
         calendar: Calendar = .current
     ) {
         self.init(input: StatsInput(trips: models), range: range, speciesID: speciesID, now: now, calendar: calendar)
-    }
-
-    // MARK: Rates
-
-    /// Nil when there is not enough time on the water to mean anything.
-    var fishPerHour: Double? {
-        guard hoursFished >= StatsLimits.minimumHoursForRate else { return nil }
-        return Double(totalFish) / hoursFished
-    }
-
-    /// Share of trips with no fish, 0 to 1. Nil with no trips.
-    var skunkRate: Double? {
-        guard !facts.isEmpty else { return nil }
-        let skunked = facts.filter { $0.fish == 0 }.count
-        return Double(skunked) / Double(facts.count)
-    }
-
-    /// Share of fish released, 0 to 1. Nil with no fish.
-    var releasedShare: Double? {
-        guard totalFish > 0 else { return nil }
-        return Double(releasedFish) / Double(totalFish)
     }
 
     // MARK: Helpers for the screen
@@ -476,7 +456,8 @@ extension StatsCalculator {
     }
 
     /// Trims each lure and groups them without regard to capitals. The name shown is the spelling
-    /// used on the most catches. Catches with no lure are left out.
+    /// used on the most catches. Catches with no lure are left out. Every lure, most fish first;
+    /// the caller trims it for the Top lures card and counts it for the summary.
     fileprivate static func lures(_ catches: [StatsCatchRecord]) -> [LureCount] {
         var tallies: [String: LureTally] = [:]
         for fishCatch in catches {
@@ -509,7 +490,7 @@ extension StatsCalculator {
             if lhs.catches != rhs.catches { return lhs.catches > rhs.catches }
             return lhs.key < rhs.key
         }
-        return Array(ranked.prefix(StatsLimits.topListLimit))
+        return ranked
     }
 }
 
