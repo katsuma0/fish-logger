@@ -50,8 +50,19 @@ jobs:
             -project FishLogger.xcodeproj \
             -scheme FishLogger \
             -destination "id=${{ steps.sim.outputs.udid }}" \
+            -resultBundlePath TestResults.xcresult \
             CODE_SIGNING_ALLOWED=NO > test.log 2>&1
           STATUS=$?
           grep -E "Test case|Test run|✘|recorded an issue|error:|\*\* TEST" test.log | tail -250
-          if [ $STATUS -ne 0 ]; then tail -80 test.log; fi
+          if [ $STATUS -ne 0 ]; then
+            tail -80 test.log
+            # A crash in the test host fails every test in flight with no reason, so print the why.
+            echo "::group::Failure messages"
+            xcrun xcresulttool get test-results tests --path TestResults.xcresult | python3 .github/scripts/print_failures.py
+            echo "::endgroup::"
+            echo "::group::Crash reports"
+            grep -nE "Fatal error|Crash:|crashed|Restarting after|EXC_|SIGABRT|SIGTRAP|terminating due to" test.log | head -60
+            ls -t ~/Library/Logs/DiagnosticReports/FishLogger*.ips 2>/dev/null | head -3 | xargs python3 .github/scripts/print_crash.py
+            echo "::endgroup::"
+          fi
           exit $STATUS
