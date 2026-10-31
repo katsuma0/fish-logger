@@ -6,7 +6,8 @@ private enum TodayTileStyle {
     case tile, row
 }
 
-/// Big species tiles. One tap is one fish; a long press has the rest.
+/// Plain name tiles on grouped cards, the way iOS draws them. One tap is one fish; a long press has
+/// the rest.
 struct TodayQuickLogGrid: View {
     let species: [Species]
     /// Fish caught this trip, by species id.
@@ -19,8 +20,8 @@ struct TodayQuickLogGrid: View {
     @Environment(AppSettings.self) private var settings
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// Tiles grow with the text so names have room for three lines.
-    @ScaledMetric(relativeTo: .subheadline) private var baseTileHeight: CGFloat = 92
-    @ScaledMetric(relativeTo: .subheadline) private var baseRowHeight: CGFloat = 60
+    @ScaledMetric(relativeTo: .headline) private var baseTileHeight: CGFloat = 92
+    @ScaledMetric(relativeTo: .headline) private var baseRowHeight: CGFloat = 60
 
     init(
         species: [Species],
@@ -66,7 +67,7 @@ struct TodayQuickLogGrid: View {
             )
             TodayActionTile(
                 title: "Photo ID",
-                systemImage: "camera.fill",
+                systemImage: "camera",
                 spokenLabel: "Photo ID",
                 hint: "Take or pick a photo and get a species suggestion",
                 style: style,
@@ -88,9 +89,22 @@ struct TodayQuickLogGrid: View {
         if dynamicTypeSize.isAccessibilitySize {
             return [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)]
         }
-        // Big text in a narrow tile breaks names mid-word, so wider tiles from xxLarge up.
-        let widthScale: CGFloat = dynamicTypeSize >= .xxLarge ? 1.25 : 1
+        // Big text in a narrow tile breaks names mid-word, so wider tiles from xLarge up.
+        let widthScale: CGFloat = dynamicTypeSize >= .xLarge ? 1.25 : 1
         return [GridItem(.adaptive(minimum: settings.buttonSize.tileMinWidth * widthScale), spacing: 10)]
+    }
+}
+
+/// The name in a tile. A one word name shrinks a little on one line rather than break mid-word.
+private struct TodayTileName: View {
+    let text: Text
+    let isOneWord: Bool
+
+    var body: some View {
+        text
+            .font(.headline)
+            .lineLimit(isOneWord ? 1 : 3)
+            .minimumScaleFactor(0.8)
     }
 }
 
@@ -103,6 +117,9 @@ private struct TodaySpeciesTile: View {
     let onLogWithDetails: () -> Void
 
     @Environment(AppSettings.self) private var settings
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+    /// Room above and below the name for the count in the corner, so a long name never runs under it.
+    @ScaledMetric(relativeTo: .caption) private var countRoom: CGFloat = 24
 
     init(
         species: Species,
@@ -148,7 +165,7 @@ private struct TodaySpeciesTile: View {
         }
         .accessibilityLabel(spokenLabel)
         .accessibilityValue(spokenValue)
-        .accessibilityHint("Logs one fish.")
+        .accessibilityHint("Logs one fish. Press and hold for more.")
         .accessibilityAction(named: Text("Log 2")) { onLog(2) }
         .accessibilityAction(named: Text("Log 3")) { onLog(3) }
         .accessibilityAction(named: Text("Log 5")) { onLog(5) }
@@ -158,60 +175,54 @@ private struct TodaySpeciesTile: View {
 
     @ViewBuilder
     private func label(name: String) -> some View {
+        let nameView = TodayTileName(text: Text(name), isOneWord: !name.contains(" "))
+            .foregroundStyle(.primary)
         switch style {
         case .tile:
-            VStack(spacing: 6) {
-                SpeciesIcon(species: species, size: settings.buttonSize.iconSize)
-                nameText(name)
-                    .multilineTextAlignment(.center)
-            }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, minHeight: minHeight)
-            .cardBackground(tint: species.color)
-            .overlay(alignment: .topTrailing) {
-                if count > 0 {
-                    countBadge
-                        .padding(6)
+            nameView
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 6)
+                .padding(.vertical, countRoom)
+                .frame(maxWidth: .infinity, minHeight: minHeight)
+                .cardBackground()
+                .overlay(alignment: .topTrailing) {
+                    if count > 0 {
+                        countBadge
+                            .padding(6)
+                    }
                 }
-            }
         case .row:
             HStack(spacing: 12) {
-                SpeciesIcon(species: species, size: settings.buttonSize.iconSize)
-                nameText(name)
+                nameView
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                if count > 0 {
-                    countBadge
-                }
+                // Kept in the row at zero, just hidden, so the first fish does not re-wrap the name.
+                countBadge
+                    .opacity(count > 0 ? 1 : 0)
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 16)
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, minHeight: minHeight)
-            .cardBackground(tint: species.color)
+            .cardBackground()
         }
     }
 
-    private func nameText(_ name: String) -> some View {
-        Text(name)
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(.primary)
-            .lineLimit(3)
-            .minimumScaleFactor(0.85)
-    }
-
+    /// The running count in a small blue capsule. VoiceOver reads it as the tile's value instead.
     private var countBadge: some View {
-        Text("\(count)")
-            .font(.caption.weight(.bold))
+        let strong = settings.usesStrongContrast(colorSchemeContrast)
+        return Text("\(count)")
+            .font(.caption.weight(.semibold))
             .monospacedDigit()
             .foregroundStyle(Color.white)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(Capsule().fill(species.color))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(TodayFill.accent(strong: strong)))
             .accessibilityHidden(true)
     }
 }
 
+/// Other fish and Photo ID. Drawn like the fish tiles, with blue text and a small symbol, the way
+/// iOS marks an action.
 private struct TodayActionTile: View {
     let title: String
     let systemImage: String
@@ -222,6 +233,9 @@ private struct TodayActionTile: View {
     let action: () -> Void
 
     @Environment(AppSettings.self) private var settings
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+    /// Same room as the fish tiles keep for their count, so a row of tiles lines up.
+    @ScaledMetric(relativeTo: .caption) private var countRoom: CGFloat = 24
 
     init(
         title: String,
@@ -253,45 +267,26 @@ private struct TodayActionTile: View {
 
     @ViewBuilder
     private var label: some View {
+        let strong = settings.usesStrongContrast(colorSchemeContrast)
+        // The symbol sits in the text, so it wraps with the words and scales with them.
+        let titleView = TodayTileName(text: Text("\(Image(systemName: systemImage)) \(title)"), isOneWord: false)
+            .foregroundStyle(strong ? Color.primary : Color.accentColor)
         switch style {
         case .tile:
-            VStack(spacing: 6) {
-                icon
-                titleText
-                    .multilineTextAlignment(.center)
-            }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, minHeight: minHeight)
-            .cardBackground()
+            titleView
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 6)
+                .padding(.vertical, countRoom)
+                .frame(maxWidth: .infinity, minHeight: minHeight)
+                .cardBackground()
         case .row:
-            HStack(spacing: 12) {
-                icon
-                    .frame(width: settings.buttonSize.iconSize)
-                titleText
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, minHeight: minHeight)
-            .cardBackground()
+            titleView
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, minHeight: minHeight)
+                .cardBackground()
         }
-    }
-
-    private var icon: some View {
-        Image(systemName: systemImage)
-            .font(.title2.weight(.semibold))
-            .foregroundStyle(Color.accentColor)
-            .frame(height: settings.buttonSize.iconSize)
-            .accessibilityHidden(true)
-    }
-
-    private var titleText: some View {
-        Text(title)
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(.primary)
-            .lineLimit(3)
-            .minimumScaleFactor(0.85)
     }
 }

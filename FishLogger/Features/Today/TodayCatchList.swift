@@ -68,7 +68,8 @@ struct TodayCatchList: View {
             Button {
                 onOpen(fishCatch)
             } label: {
-                CatchRow(fishCatch: fishCatch)
+                // Names only on Today. A photo of the fish still shows.
+                CatchRow(fishCatch: fishCatch, showsIcon: false)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
             }

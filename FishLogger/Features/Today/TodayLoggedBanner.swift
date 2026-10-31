@@ -8,14 +8,13 @@ struct TodayLoggedInfo: Equatable {
     let token: UUID
     let title: String
     let subtitle: String
-    let species: Species?
     var sizeLabel: String?
     var hasPhoto: Bool
 }
 
-/// One-row confirmation after a log: species, "Walleye logged" with the trip count, then Size, Photo
-/// and Undo. It floats over the top of the screen, where the trip header is, so it never pushes the
-/// tiles down or sits where the thumb is logging the next fish.
+/// One-row confirmation after a log: "Walleye logged" with the trip count, then Size, Photo and Undo.
+/// It floats over the top of the screen, where the trip header is, so it never pushes the tiles down
+/// or sits where the thumb is logging the next fish.
 struct TodayLoggedBanner: View {
     let info: TodayLoggedInfo
     /// True while a sheet or the camera is up, so the confirmation is still there afterwards.
@@ -30,10 +29,9 @@ struct TodayLoggedBanner: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
     @Environment(\.accessibilitySwitchControlEnabled) private var switchControlEnabled
-    @ScaledMetric(relativeTo: .subheadline) private var iconSize: CGFloat = 30
-    /// The icon plus the longest species word ("Pumpkinseed") on one line. Any narrower and the title
-    /// breaks mid-word, so the banner stacks instead.
-    @ScaledMetric(relativeTo: .subheadline) private var minSummaryWidth: CGFloat = 140
+    /// The longest species word ("Pumpkinseed") on one line. Any narrower and the title breaks
+    /// mid-word, so the banner stacks instead.
+    @ScaledMetric(relativeTo: .subheadline) private var minSummaryWidth: CGFloat = 100
     /// Off for a moment after each log, so a quick second tap meant for a tile is not caught here.
     @State private var acceptsTaps = false
 
@@ -100,16 +98,13 @@ struct TodayLoggedBanner: View {
     }
 
     private var summary: some View {
-        HStack(alignment: .center, spacing: 10) {
-            SpeciesIcon(species: info.species, size: iconSize)
-            VStack(alignment: .leading, spacing: 0) {
-                Text(info.title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
-                Text(info.subtitle)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
+        VStack(alignment: .leading, spacing: 0) {
+            Text(info.title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+            Text(info.subtitle)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)

@@ -13,7 +13,6 @@ enum TodaySheet: Identifiable {
     case setSize(FishCatch)
     case pickSpecies
     case identify
-    case lastTrip(Trip)
 
     var id: String {
         switch self {
@@ -29,8 +28,6 @@ enum TodaySheet: Identifiable {
             return "pickSpecies"
         case .identify:
             return "identify"
-        case .lastTrip(let trip):
-            return "lastTrip-\(trip.id.uuidString)"
         }
     }
 }
@@ -45,14 +42,8 @@ private struct TodayGridKey: Equatable {
     let mostLogged: [String]?
 }
 
-/// The idle card's text and the trip it opens, fetched once rather than worked out on every render.
-private struct TodayIdleInfo {
-    var summary = " "
-    var lastTrip: Trip?
-}
-
-/// Whether the catch history behind the idle grid changed since it was last fetched. A class, so a
-/// save noting it does not redraw the screen.
+/// Whether the catch history behind the grid shown between trips changed since it was last fetched.
+/// A class, so a save noting it does not redraw the screen.
 private final class TodayHistoryCache {
     var isStale = true
 }
@@ -80,7 +71,6 @@ struct TodayView: View {
     /// Nil until the first fetch, so the grid keeps its last order instead of shuffling as it loads.
     @State private var mostLoggedIDs: [String]?
     @State private var historyCache = TodayHistoryCache()
-    @State private var idle = TodayIdleInfo()
     @State private var staleTripID: UUID?
     @State private var refreshedTripIDs: Set<UUID> = []
     @State private var isFetchingWeather = false
@@ -153,7 +143,7 @@ struct TodayView: View {
         VStack(alignment: .leading, spacing: 20) {
             statusSection(trip: trip, counts: counts)
 
-            quickLogSection(trip: trip, counts: counts)
+            quickLogSection(counts: counts)
 
             if let trip {
                 TodayConditionsCard(
@@ -176,8 +166,7 @@ struct TodayView: View {
         .padding(.vertical, 12)
     }
 
-    /// The trip header, the stale trip question, or the idle card. All three sit in the same slot at
-    /// about the same height, so the grid below barely moves when one replaces another.
+    /// The trip header or the stale trip question while a trip runs, and only Start fishing otherwise.
     @ViewBuilder
     private func statusSection(trip: Trip?, counts: [String: Int]) -> some View {
         if let trip {
@@ -195,43 +184,23 @@ struct TodayView: View {
                 )
             }
         } else {
-            idleSection
-        }
-    }
-
-    private var idleSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            TodayIdleCard(
-                summary: idle.summary,
-                onOpenLastTrip: openLastTrip
-            )
             Button {
                 activeSheet = .startTrip
             } label: {
-                Label("Start fishing", systemImage: "figure.fishing")
+                Text("Start fishing")
             }
             .buttonStyle(PrimaryActionButtonStyle())
             .accessibilityHint("Pick the spot and start a trip")
         }
     }
 
-    private var openLastTrip: (() -> Void)? {
-        guard let last = idle.lastTrip else { return nil }
-        return { activeSheet = .lastTrip(last) }
-    }
-
-    private func quickLogSection(trip: Trip?, counts: [String: Int]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Log a fish")
-                    .font(.headline)
-                    .accessibilityAddTraits(.isHeader)
-                // Same length either way, so the grid does not shift when the first fish starts a trip.
-                Text(trip == nil ? "Tap a fish to log it. A trip starts on its own." : "Tap a fish to log it. Press and hold for more.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(trip != nil)
-            }
+    /// The same one line in every state. Press and hold is in each tile's VoiceOver hint.
+    private func quickLogSection(counts: [String: Int]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Tap a fish to log")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .accessibilityAddTraits(.isHeader)
             TodayQuickLogGrid(
                 species: tileOrder.speciesIDs.compactMap { SpeciesCatalog.species(id: $0) },
                 counts: counts,
@@ -287,7 +256,9 @@ struct TodayView: View {
     private func sheetContent(for sheet: TodaySheet) -> some View {
         switch sheet {
         case .startTrip:
-            TodayStartTripSheet(lastTrip: idle.lastTrip, onStart: { trip in
+            // Prefills the water and method from the newest trip. One small fetch, and the sheet
+            // reads it only when it first opens.
+            TodayStartTripSheet(lastTrip: CatchLogger.latestTrip(in: modelContext), onStart: { trip in
                 _ = refreshedTripIDs.insert(trip.id)
             })
         case .editTrip(let trip):
@@ -315,15 +286,6 @@ struct TodayView: View {
                 moveOffStaleTrip(fishCatch)
                 showLogged(for: fishCatch)
             })
-        case .lastTrip(let trip):
-            NavigationStack {
-                TripDetailView(trip: trip)
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Done") { activeSheet = nil }
-                        }
-                    }
-            }
         }
     }
 
@@ -420,19 +382,16 @@ struct TodayView: View {
 
     // MARK: Appearing
 
-    /// Once per appearance: history for the idle grid, the idle card, and the stale trip question.
+    /// Once per appearance: history for the grid shown between trips, and the stale trip question.
     /// A running trip keeps its tile order, so it skips the history fetch. Coming back to the tab
     /// only fetches history again when something was saved since, because it reads every catch.
     private func screenAppeared() async {
         // Another tab may have deleted the catch the confirmation points at. This runs before the
         // confirmation takes taps again, so Size, Photo and Undo never reach a deleted catch.
         validateLogged()
-        if activeTrip == nil {
-            if mostLoggedIDs == nil || historyCache.isStale {
-                historyCache.isStale = false
-                mostLoggedIDs = CatchLogger.mostLoggedSpeciesIDs(in: modelContext, limit: TodayTileOrder.maxRankedTiles)
-            }
-            loadIdleInfo()
+        if activeTrip == nil, mostLoggedIDs == nil || historyCache.isStale {
+            historyCache.isStale = false
+            mostLoggedIDs = CatchLogger.mostLoggedSpeciesIDs(in: modelContext, limit: TodayTileOrder.maxRankedTiles)
         }
         checkStaleTrip()
         // Catches may have changed species on another tab.
@@ -442,32 +401,10 @@ struct TodayView: View {
     private func activeTripChanged() {
         refreshActiveTripIfNeeded()
         checkStaleTrip()
-        if activeTrip == nil {
-            loadIdleInfo()
-        }
-    }
-
-    /// Two small fetches: today's trips and the newest trip.
-    private func loadIdleInfo() {
-        let startOfToday = Calendar.current.startOfDay(for: .now)
-        let descriptor = FetchDescriptor<Trip>(predicate: #Predicate<Trip> { $0.startDate >= startOfToday })
-        let todayTrips = (try? modelContext.fetch(descriptor)) ?? []
-        let lastTrip = CatchLogger.latestTrip(in: modelContext)
-        idle = TodayIdleInfo(
-            summary: TodayIdleCard.summaryText(
-                todayTrips: todayTrips.count,
-                todayFish: todayTrips.reduce(0) { $0 + $1.totalFish },
-                lastTrip: lastTrip
-            ),
-            lastTrip: lastTrip
-        )
     }
 
     private func sheetDismissed() {
         validateLogged()
-        if activeTrip == nil {
-            loadIdleInfo()
-        }
         // The catch editor can change a species, which may need a new tile at the end.
         refreshTiles()
     }
@@ -606,7 +543,6 @@ struct TodayView: View {
             token: UUID(),
             title: title,
             subtitle: "\(sameSpecies) this trip",
-            species: fishCatch.species,
             sizeLabel: fishCatch.sizeClass?.label,
             hasPhoto: !fishCatch.photos.isEmpty
         )

@@ -8,15 +8,19 @@ struct CatchRow: View {
     /// Shows the day above the time. Lists that mix days pass true; a catch from another day shows
     /// its date anyway, so a column of times never hides which outing a fish came from.
     var showsDate: Bool = false
+    /// Shows the species icon when the catch has no photo. The Today screen passes false and shows
+    /// names only; a photo still shows either way.
+    var showsIcon: Bool = true
 
     @Environment(AppSettings.self) private var settings
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @ScaledMetric(relativeTo: .headline) private var scaledImageSize: CGFloat = 44
 
-    init(fishCatch: FishCatch, showsDate: Bool = false) {
+    init(fishCatch: FishCatch, showsDate: Bool = false, showsIcon: Bool = true) {
         self.fishCatch = fishCatch
         self.showsDate = showsDate
+        self.showsIcon = showsIcon
     }
 
     var body: some View {
@@ -65,7 +69,7 @@ struct CatchRow: View {
         // The oldest photo is the cover. min avoids sorting every photo on each render.
         if let cover = fishCatch.photos.min(by: { $0.createdAt < $1.createdAt }) {
             PhotoThumbnail(photo: cover, size: imageSize)
-        } else {
+        } else if showsIcon {
             SpeciesIcon(species: fishCatch.species, size: imageSize)
         }
     }
