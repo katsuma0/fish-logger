@@ -5,8 +5,12 @@ enum SpeciesCatalog {
     static let unknownID = "unknown"
 
     /// Every species, Canada first, then the rest of North America by batch.
-    static let all: [Species] = canadianSpecies + southernSpecies + bigRiverSpecies + westernSpecies
-        + moreFreshwaterSpecies + northAtlanticSpecies + southCoastSpecies + offshoreSpecies + pacificCoastSpecies
+    // One array of batches, not a long chain of +, which the type checker gets slow on.
+    static let all: [Species] = [
+        canadianSpecies, southernSpecies, bigRiverSpecies, westernSpecies,
+        moreFreshwaterSpecies, northAtlanticSpecies, southCoastSpecies, offshoreSpecies, pacificCoastSpecies,
+        freshwaterGapSpecies, atlanticMoreSpecies, gulfMoreSpecies, pacificMoreSpecies,
+    ].flatMap { $0 }
 
     /// Placeholder for fish you could not identify. Not part of `all` so it stays out of browsing.
     static let unknown = Species(
