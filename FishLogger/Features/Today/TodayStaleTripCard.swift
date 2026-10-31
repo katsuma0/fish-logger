@@ -89,7 +89,7 @@ struct TodayStaleTripCard: View {
                     .frame(maxWidth: .infinity, minHeight: settings.buttonSize.minTapSize)
             }
             .buttonStyle(.borderedProminent)
-            .tint(Theme.accentFillColor(strong: settings.usesStrongContrast(colorSchemeContrast)))
+            .tint(TodayFill.accent(strong: settings.usesStrongContrast(colorSchemeContrast)))
             .accessibilityHint(lastCatch == nil ? "Ends the trip at its start time" : "Ends the trip at your last fish")
 
             Button(action: onKeepGoing) {

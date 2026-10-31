@@ -216,7 +216,7 @@ private struct TodaySpeciesTile: View {
             .foregroundStyle(Color.white)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .background(Capsule().fill(Theme.accentFillColor(strong: strong)))
+            .background(Capsule().fill(TodayFill.accent(strong: strong)))
             .accessibilityHidden(true)
     }
 }

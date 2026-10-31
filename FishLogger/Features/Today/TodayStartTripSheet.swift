@@ -157,7 +157,7 @@ struct TodayStartTripSheet: View {
                 .frame(minHeight: settings.buttonSize.minTapSize)
                 .foregroundStyle(isSelected ? Color.white : Color.primary)
                 .background(
-                    Capsule().fill(isSelected ? Theme.accentFillColor(strong: strong) : Color(uiColor: .tertiarySystemFill))
+                    Capsule().fill(isSelected ? TodayFill.accent(strong: strong) : Color(uiColor: .tertiarySystemFill))
                 )
                 .overlay(
                     Capsule().strokeBorder(strong ? Color.primary : Color.clear, lineWidth: 1.5)
