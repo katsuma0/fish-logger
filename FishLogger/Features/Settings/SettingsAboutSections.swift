@@ -37,6 +37,8 @@ struct SettingsPermissionsSection: View {
 }
 
 struct SettingsAboutSection: View {
+    @Environment(AppSettings.self) private var settings
+
     private static let openMeteoURL = URL(string: "https://open-meteo.com")!
     private static let regulationsURL = URL(string: "https://www.ontario.ca/document/ontario-fishing-regulations-summary")!
 
@@ -46,8 +48,13 @@ struct SettingsAboutSection: View {
             Link(destination: Self.openMeteoURL) {
                 Label("Weather data by Open-Meteo.com, CC BY 4.0", systemImage: "cloud.sun")
             }
-            Link(destination: Self.regulationsURL) {
-                Label("Check the Ontario Fishing Regulations Summary before keeping fish.", systemImage: "book.closed")
+            // Ontario's summary is the one link worth hard-coding; everywhere else gets a plain reminder.
+            if settings.homeRegions.isEmpty || settings.homeRegions.contains(.ontario) {
+                Link(destination: Self.regulationsURL) {
+                    Label("Check the Ontario Fishing Regulations Summary before keeping fish.", systemImage: "book.closed")
+                }
+            } else {
+                Label("Check your province or state's fishing rules before keeping fish.", systemImage: "book.closed")
             }
             Text("Made in Markham, Ontario.")
                 .foregroundStyle(.secondary)
