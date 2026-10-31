@@ -3,7 +3,7 @@ import SwiftUI
 import UIKit
 
 /// The Settings tab, laid out like the iOS Settings app: rows with small coloured icons, grouped
-/// into sections, each opening a page for one topic.
+/// into sections, each opening a page for one topic. Every row icon is a filled symbol in white.
 struct SettingsView: View {
     @Environment(AppSettings.self) private var settings
 
@@ -42,7 +42,7 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    SettingsLinkRow("Permissions", systemImage: "location.fill", color: .systemGray) {
+                    SettingsLinkRow("Permissions", systemImage: "location.fill", color: .systemBlue) {
                         SettingsPermissionsView()
                     }
                     SettingsLinkRow("Data", systemImage: "externaldrive.fill", color: .systemGreen) {
@@ -51,7 +51,7 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    SettingsLinkRow("About", systemImage: "info.circle", color: .systemGray) {
+                    SettingsLinkRow("About", systemImage: "info.circle.fill", color: .systemGray) {
                         SettingsAboutView()
                     }
                 }
@@ -101,13 +101,17 @@ struct SettingsLinkRow<Destination: View>: View {
     }
 }
 
-/// Icon and title, with the value in grey on the right when there is one, like the Wi-Fi row in
-/// iOS Settings. VoiceOver reads the title, then the value.
+/// One Settings row the way iOS Settings draws it: the icon, a fixed gap, then the title, with the
+/// value in grey on the right when there is one, like the Wi-Fi row. The row separator starts under
+/// the title, not under the icon. VoiceOver reads the title, then the value.
 struct SettingsRowLabel: View {
     private let title: String
     private let systemImage: String
     private let color: UIColor
     private let value: String?
+
+    /// Space between the icon and the title.
+    private static let iconSpacing: CGFloat = 14
 
     init(_ title: String, systemImage: String, color: UIColor, value: String? = nil) {
         self.title = title
@@ -117,29 +121,32 @@ struct SettingsRowLabel: View {
     }
 
     var body: some View {
+        HStack(spacing: Self.iconSpacing) {
+            SettingsIcon(systemImage: systemImage, color: color)
+            titleAndValue
+                .alignmentGuide(.listRowSeparatorLeading) { dimensions in
+                    dimensions[.leading]
+                }
+        }
+    }
+
+    @ViewBuilder
+    private var titleAndValue: some View {
         if let value {
             LabeledContent {
                 Text(value)
             } label: {
-                titleAndIcon
+                Text(title)
             }
         } else {
-            titleAndIcon
-        }
-    }
-
-    private var titleAndIcon: some View {
-        Label {
             Text(title)
-        } icon: {
-            SettingsIcon(systemImage: systemImage, color: color)
         }
     }
 }
 
-/// A white symbol on a small rounded square in a system colour, the way iOS Settings marks its
-/// rows. It grows a little with the text size, and high contrast switches to the darker system
-/// colours that Increase Contrast uses.
+/// A white symbol on a rounded square in a system colour, the way iOS Settings marks its rows:
+/// 29 points at the default text size, growing a little with larger text up to a cap. The square
+/// keeps its size whatever the symbol, so wide symbols stay centred and every row lines up.
 struct SettingsIcon: View {
     private let systemImage: String
     private let color: UIColor
@@ -148,34 +155,44 @@ struct SettingsIcon: View {
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @ScaledMetric(relativeTo: .body) private var scaledSide: CGFloat = 29
 
+    /// Sizes from iOS Settings at the default text size.
+    private static let baseSide: CGFloat = 29
+    private static let baseCornerRadius: CGFloat = 6.5
+    private static let baseSymbolSize: CGFloat = 17
+    /// Largest the square gets, so it never crowds the title at the accessibility text sizes.
+    private static let maximumSide: CGFloat = 40
+
     init(systemImage: String, color: UIColor) {
         self.systemImage = systemImage
         self.color = color
     }
 
     var body: some View {
-        // Capped so the icon never crowds the title at the largest accessibility sizes.
-        let side = min(scaledSide, 44)
-        let strong = settings.usesStrongContrast(colorSchemeContrast)
-        Image(systemName: systemImage)
-            .symbolRenderingMode(.monochrome)
-            .font(.system(size: side * 0.6, weight: .medium))
-            .foregroundStyle(Color.white)
+        let side = min(max(scaledSide, Self.baseSide), Self.maximumSide)
+        let scale = side / Self.baseSide
+        RoundedRectangle(cornerRadius: Self.baseCornerRadius * scale, style: .continuous)
+            .fill(fillColor)
             .frame(width: side, height: side)
-            .background(
-                RoundedRectangle(cornerRadius: side * 0.24, style: .continuous)
-                    .fill(Self.fill(color, strong: strong))
-            )
+            .overlay {
+                Image(systemName: systemImage)
+                    .symbolRenderingMode(.monochrome)
+                    .font(.system(size: Self.baseSymbolSize * scale, weight: .medium))
+                    .foregroundStyle(Color.white)
+                    .frame(width: side, height: side)
+            }
             .accessibilityHidden(true)
     }
 
-    /// The system colour as is, or its Increase Contrast version when the app's High contrast is on.
-    /// With the iPhone switch on, the system colour already resolves to that version.
-    private static func fill(_ base: UIColor, strong: Bool) -> Color {
-        guard strong else { return Color(uiColor: base) }
-        return Color(uiColor: UIColor { traits in
-            base.resolvedColor(with: traits.modifyingTraits { $0.accessibilityContrast = .high })
-        })
+    /// The plain system colour. High contrast, from the app setting or the iPhone switch, uses the
+    /// deep Increase Contrast version from light mode in light and dark mode alike, so the white
+    /// symbol stands out. The dark mode versions are lighter, which would fade the symbol.
+    private var fillColor: Color {
+        guard settings.usesStrongContrast(colorSchemeContrast) else {
+            return Color(uiColor: color)
+        }
+        let deepTraits = UITraitCollection(userInterfaceStyle: .light)
+            .modifyingTraits { $0.accessibilityContrast = .high }
+        return Color(uiColor: color.resolvedColor(with: deepTraits))
     }
 }
 
