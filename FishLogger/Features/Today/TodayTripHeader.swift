@@ -19,8 +19,8 @@ enum TodayFormat {
     }
 }
 
-/// Summary card for the running trip: where, how long, how many. Conditions live in their own card
-/// below the tiles, so chips filling in as the weather arrives never push the grid down.
+/// Summary card for the running trip: where, and how many once the first fish is in. Conditions live
+/// in their own card below the tiles, so chips filling in as the weather arrives never push the grid down.
 struct TodayTripHeader: View {
     let trip: Trip
     let speciesCount: Int
@@ -66,7 +66,10 @@ struct TodayTripHeader: View {
             .buttonStyle(.plain)
             .accessibilityHint("Edit the spot and conditions")
 
-            statRow
+            // No counts until something is logged, so a new trip shows only the spot.
+            if trip.totalFish > 0 {
+                statRow
+            }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -82,7 +85,7 @@ struct TodayTripHeader: View {
         let stacked = dynamicTypeSize.isAccessibilitySize
         let layout = stacked
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
-            : AnyLayout(HStackLayout(alignment: .top, spacing: 24))
+            : AnyLayout(HStackLayout(alignment: .lastTextBaseline, spacing: 24))
         let fish = trip.totalFish
 
         return layout {
@@ -94,26 +97,19 @@ struct TodayTripHeader: View {
                 stacked: stacked
             )
             .fixedSize(horizontal: !stacked, vertical: false)
-            statBlock(
-                value: "\(speciesCount)",
-                caption: "species",
-                spoken: "\(speciesCount) species",
-                prominent: false,
-                stacked: stacked
-            )
-            .fixedSize(horizontal: !stacked, vertical: false)
-            // Ticks on the trip's own minute marks, so the readout changes right when the minute does.
-            TimelineView(.periodic(from: trip.startDate, by: 60)) { context in
+            // Unknown fish add to the fish total but not to species, so skip a lone "0 species".
+            if speciesCount > 0 {
                 statBlock(
-                    value: Self.elapsedText(from: trip.startDate, to: context.date),
-                    caption: "on the water",
-                    spoken: Self.elapsedSpoken(from: trip.startDate, to: context.date),
+                    value: "\(speciesCount)",
+                    caption: "species",
+                    spoken: "\(speciesCount) species",
                     prominent: false,
                     stacked: stacked
                 )
+                .fixedSize(horizontal: !stacked, vertical: false)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder
@@ -141,26 +137,6 @@ struct TodayTripHeader: View {
         .frame(maxWidth: stacked ? .infinity : nil, alignment: .leading)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(spoken)
-    }
-
-    private static func elapsedText(from start: Date, to now: Date) -> String {
-        let minutes = max(0, Int(now.timeIntervalSince(start) / 60))
-        let hours = minutes / 60
-        let rest = minutes % 60
-        if hours == 0 { return "\(rest) min" }
-        if rest == 0 { return "\(hours) h" }
-        return "\(hours) h \(rest) min"
-    }
-
-    private static func elapsedSpoken(from start: Date, to now: Date) -> String {
-        let minutes = max(0, Int(now.timeIntervalSince(start) / 60))
-        let hours = minutes / 60
-        let rest = minutes % 60
-        let hourText = hours == 1 ? "1 hour" : "\(hours) hours"
-        let minuteText = rest == 1 ? "1 minute" : "\(rest) minutes"
-        if hours == 0 { return "On the water for \(minuteText)" }
-        if rest == 0 { return "On the water for \(hourText)" }
-        return "On the water for \(hourText) \(minuteText)"
     }
 }
 
