@@ -58,9 +58,13 @@ struct RegionPickerSections: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .font(.title3)
-                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                // A plain checkmark on picked rows, like a list in the iOS Settings app. The
+                // selected trait tells VoiceOver, so the mark itself is hidden.
+                Image(systemName: "checkmark")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(Color.accentColor)
+                    .opacity(isSelected ? 1 : 0)
+                    .accessibilityHidden(true)
             }
             .frame(minHeight: settings.buttonSize.minTapSize)
             .contentShape(Rectangle())
@@ -123,14 +127,13 @@ struct TargetFishGrid: View {
         return [GridItem(.adaptive(minimum: max(150, settings.buttonSize.tileMinWidth * 1.4)), spacing: 10)]
     }
 
+    /// Names only, no fish badge, to match the quick log.
     private func tile(_ group: SpeciesGroup) -> some View {
         let isSelected = selection.contains(group)
-        let species = SpeciesCatalog.species(id: group.representativeSpeciesID)
         return Button {
             if isSelected { selection.remove(group) } else { selection.insert(group) }
         } label: {
             HStack(spacing: 10) {
-                SpeciesIcon(species: species, size: 34)
                 Text(group.targetLabel)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
@@ -138,8 +141,10 @@ struct TargetFishGrid: View {
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
+                // The selected trait tells VoiceOver, so the mark itself is hidden.
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                    .accessibilityHidden(true)
             }
             .padding(12)
             .frame(maxWidth: .infinity, minHeight: settings.buttonSize.minTapSize + 12, alignment: .leading)

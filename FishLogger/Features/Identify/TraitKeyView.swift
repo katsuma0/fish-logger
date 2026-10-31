@@ -236,7 +236,7 @@ struct TraitKeyView: View {
         .background(
             Capsule(style: .continuous)
                 // AccentFill, not AccentColor, so the white label stays readable in dark mode.
-                .fill(isOn ? Theme.accentFill : Color(uiColor: .tertiarySystemFill))
+                .fill(isOn ? Theme.accentFillColor(strong: strongContrast) : Color(uiColor: .tertiarySystemFill))
         )
         .overlay(
             Capsule(style: .continuous)
@@ -280,6 +280,7 @@ private struct TraitKeyMatchBar: View {
 
     @Environment(AppSettings.self) private var settings
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
     var body: some View {
         let isLarge = dynamicTypeSize.isAccessibilitySize
@@ -319,8 +320,11 @@ private struct TraitKeyMatchBar: View {
         }
     }
 
+    /// Grey fill like an iOS bordered button, so it shows on the bar in light and dark mode.
     private func button(for match: TraitKeyMatch) -> some View {
         let summary = TraitKeyMatch.summary(match.matches, of: total)
+        let strong = settings.usesStrongContrast(colorSchemeContrast)
+        let shape = RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous)
         return Button {
             onPick(match.species)
         } label: {
@@ -341,8 +345,9 @@ private struct TraitKeyMatchBar: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
             .frame(maxWidth: .infinity, minHeight: settings.buttonSize.minTapSize, alignment: .leading)
-            .cardBackground(tint: match.species.color)
-            .contentShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
+            .background(shape.fill(Color(uiColor: .tertiarySystemFill)))
+            .overlay(shape.strokeBorder(strong ? Color.primary : Color.clear, lineWidth: strong ? 2 : 0))
+            .contentShape(shape)
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .ignore)

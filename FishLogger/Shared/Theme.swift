@@ -12,14 +12,25 @@ extension Color {
     }
 }
 
+/// Stock iOS look: system grouped backgrounds (true black with grey cards in dark mode), system blue
+/// for the accent, and the system font in its text styles.
 enum Theme {
-    /// Card fill that holds up in both light and dark mode.
+    /// Card fill: white on light grey, iOS grey on black in dark mode.
     static let cardBackground = Color(uiColor: .secondarySystemGroupedBackground)
     static let screenBackground = Color(uiColor: .systemGroupedBackground)
-    static let cornerRadius: CGFloat = 14
-    /// Accent for filled backgrounds behind white text. Darker than AccentColor so white text clears
-    /// 4.5:1 in light and dark mode. Asset "AccentFill". Keep AccentColor for tinted text and icons.
+    static let cornerRadius: CGFloat = 12
+    /// System blue for filled backgrounds behind white text. Asset "AccentFill". It matches
+    /// AccentColor, except with Increase Contrast on in dark mode, where it stays on the deep blue
+    /// so white text still reads. Keep AccentColor for tinted text and icons.
     static let accentFill = Color("AccentFill")
+    /// The deep blue iOS uses with Increase Contrast on. White text on it clears 7:1.
+    static let strongAccentFill = Color(hex: 0x0040DD)
+
+    /// Fill behind white text. High contrast, from the app setting or the system switch, gets the
+    /// deep blue in light and dark mode.
+    static func accentFillColor(strong: Bool) -> Color {
+        strong ? strongAccentFill : accentFill
+    }
 }
 
 extension AppSettings {
@@ -29,7 +40,8 @@ extension AppSettings {
     }
 }
 
-/// Rounded card used for tiles and summary blocks. High contrast swaps the soft fill for a hard border.
+/// Rounded card used for tiles and summary blocks, in the iOS grouped card grey. High contrast adds a
+/// hard border. A tint is for selection states, not for colouring cards by species.
 struct CardBackground: ViewModifier {
     @Environment(AppSettings.self) private var settings
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
@@ -65,49 +77,59 @@ extension View {
     }
 }
 
-/// Big full-width button for the main action on a screen. Height follows the Button size setting.
-/// The default fill is `Theme.accentFill`, which keeps white text readable in dark mode.
+/// Big full-width button for the main action on a screen, drawn like an iOS filled button: system
+/// blue, white headline text, and a dimmed fill while pressed. Height follows the Button size setting.
+/// High contrast swaps in the deep blue and adds a border. A disabled button goes grey.
 struct PrimaryActionButtonStyle: ButtonStyle {
     @Environment(AppSettings.self) private var settings
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
-    var tint: Color = Theme.accentFill
+    /// Nil uses system blue.
+    private let tint: Color?
+
+    init(tint: Color? = nil) {
+        self.tint = tint
+    }
 
     func makeBody(configuration: Configuration) -> some View {
         let strong = settings.usesStrongContrast(colorSchemeContrast)
+        let shape = RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous)
+        let fill: Color = isEnabled
+            ? (tint ?? Theme.accentFillColor(strong: strong))
+            : Color(uiColor: .tertiarySystemFill)
         return configuration.label
             .font(.headline)
             .multilineTextAlignment(.center)
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, minHeight: settings.buttonSize.primaryButtonHeight)
             .padding(.horizontal, 16)
-            .foregroundStyle(.white)
+            .foregroundStyle(isEnabled ? Color.white : Color(uiColor: .secondaryLabel))
             .background(
-                RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous)
-                    .fill(isEnabled ? tint : Color.gray)
-                    .opacity(configuration.isPressed ? 0.75 : 1)
+                shape
+                    .fill(fill)
+                    .opacity(configuration.isPressed ? 0.7 : 1)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous)
-                    .strokeBorder(strong ? Color.primary : Color.clear, lineWidth: 2)
+                shape.strokeBorder(strong ? Color.primary : Color.clear, lineWidth: 2)
             )
-            .contentShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
+            .contentShape(shape)
     }
 }
 
-/// Shows a fish tinted with the species colour. Used everywhere a species appears.
+/// Small species badge in the style of an iOS Settings icon: a flat rounded square in the species
+/// colour with a white fish. Used beside species names in lists.
 struct SpeciesIcon: View {
     let species: Species?
     var size: CGFloat = 36
 
     var body: some View {
-        let tint = species?.color ?? .gray
-        RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
-            .fill(tint.gradient)
+        let tint = species?.color ?? Color(uiColor: .systemGray)
+        RoundedRectangle(cornerRadius: size * 0.225, style: .continuous)
+            .fill(tint)
             .frame(width: size, height: size)
             .overlay(
                 Image(systemName: "fish.fill")
-                    .font(.system(size: size * 0.5, weight: .semibold))
+                    .font(.system(size: size * 0.5, weight: .medium))
                     .foregroundStyle(.white)
             )
             .accessibilityHidden(true)
