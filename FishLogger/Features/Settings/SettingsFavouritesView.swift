@@ -48,12 +48,12 @@ struct SettingsFavouritesView: View {
                         .frame(minHeight: settings.buttonSize.minTapSize)
                     }
                 } footer: {
-                    Text("Your regions: \(settings.homeRegionsSummary). Change them in Settings.")
+                    Text("Your regions: \(settings.homeRegionsSummary). Change them under Your fishing in Settings.")
                 }
             }
         }
-        .listStyle(.insetGrouped)
-        .navigationTitle("Favourite species")
+        .settingsListStyle()
+        .navigationTitle("Favourites")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {

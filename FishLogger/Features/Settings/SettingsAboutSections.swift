@@ -2,26 +2,35 @@ import CoreLocation
 import SwiftUI
 import UIKit
 
-struct SettingsPermissionsSection: View {
+/// Location access, with a way to ask for it or change it in iPhone Settings.
+struct SettingsPermissionsView: View {
     @Environment(\.openURL) private var openURL
 
     var body: some View {
         let location = LocationService.shared
-        Section {
-            LabeledContent("Location", value: locationStatus(location))
-            if location.authorizationStatus == .notDetermined {
-                Button("Allow location") {
-                    location.requestPermission()
+        List {
+            Section {
+                LabeledContent("Location", value: locationStatus(location))
+                if location.authorizationStatus == .notDetermined {
+                    Button("Allow location") {
+                        location.requestPermission()
+                    }
                 }
+            } footer: {
+                Text("Location fills in the spot name, the weather, and where each fish came from.")
             }
-            Button("Open iPhone Settings") {
-                openSettings()
+
+            Section {
+                Button("Open iPhone Settings") {
+                    openSettings()
+                }
+            } footer: {
+                Text("Change what this app can use in iPhone Settings.")
             }
-        } header: {
-            Text("Permissions")
-        } footer: {
-            Text("Location fills in the spot name, the weather, and where each fish came from.")
         }
+        .settingsListStyle()
+        .navigationTitle("Permissions")
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     private func locationStatus(_ location: LocationService) -> String {
@@ -36,31 +45,44 @@ struct SettingsPermissionsSection: View {
     }
 }
 
-struct SettingsAboutSection: View {
+/// Version, weather credit, and where to find the fishing rules.
+struct SettingsAboutView: View {
     @Environment(AppSettings.self) private var settings
 
     private static let openMeteoURL = URL(string: "https://open-meteo.com")!
     private static let regulationsURL = URL(string: "https://www.ontario.ca/document/ontario-fishing-regulations-summary")!
 
     var body: some View {
-        Section {
-            LabeledContent("Version", value: Self.appVersion)
-            Link(destination: Self.openMeteoURL) {
-                Label("Weather data by Open-Meteo.com, CC BY 4.0", systemImage: "cloud.sun")
+        // Ontario's summary is the one link worth hard-coding; everywhere else gets a plain reminder.
+        let showsOntarioRules = settings.homeRegions.isEmpty || settings.homeRegions.contains(.ontario)
+        List {
+            Section {
+                LabeledContent("Version", value: Self.appVersion)
             }
-            // Ontario's summary is the one link worth hard-coding; everywhere else gets a plain reminder.
-            if settings.homeRegions.isEmpty || settings.homeRegions.contains(.ontario) {
-                Link(destination: Self.regulationsURL) {
-                    Label("Check the Ontario Fishing Regulations Summary before keeping fish.", systemImage: "book.closed")
+
+            Section {
+                Link("Weather data by Open-Meteo.com, CC BY 4.0", destination: Self.openMeteoURL)
+            } header: {
+                Text("Weather")
+            }
+
+            Section {
+                if showsOntarioRules {
+                    Link("Ontario Fishing Regulations Summary", destination: Self.regulationsURL)
+                } else {
+                    Text("Check your province or state's fishing rules before keeping fish.")
                 }
-            } else {
-                Label("Check your province or state's fishing rules before keeping fish.", systemImage: "book.closed")
+            } header: {
+                Text("Fishing rules")
+            } footer: {
+                if showsOntarioRules {
+                    Text("Check the rules before keeping fish.")
+                }
             }
-            Text("Made in Markham, Ontario.")
-                .foregroundStyle(.secondary)
-        } header: {
-            Text("About")
         }
+        .settingsListStyle()
+        .navigationTitle("About")
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     private static var appVersion: String {
@@ -71,4 +93,11 @@ struct SettingsAboutSection: View {
         }
         return "\(version) (\(build))"
     }
+}
+
+#Preview("About") {
+    NavigationStack {
+        SettingsAboutView()
+    }
+    .environment(AppSettings.shared)
 }
