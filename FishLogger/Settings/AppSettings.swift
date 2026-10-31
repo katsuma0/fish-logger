@@ -110,7 +110,6 @@ final class AppSettings {
         static let highContrast = "highContrast"
         static let hapticsEnabled = "hapticsEnabled"
         static let leftHanded = "leftHanded"
-        static let keepScreenOn = "keepScreenOn"
         static let lengthUnit = "lengthUnit"
         static let weightUnit = "weightUnit"
         static let temperatureUnit = "temperatureUnit"
@@ -166,12 +165,6 @@ final class AppSettings {
     var leftHanded: Bool {
         get { access(keyPath: \.leftHanded); return boolValue(Keys.leftHanded, default: false) }
         set { withMutation(keyPath: \.leftHanded) { defaults.set(newValue, forKey: Keys.leftHanded) } }
-    }
-
-    /// Stops auto-lock while a trip is active. Costs battery, so it is off by default.
-    var keepScreenOn: Bool {
-        get { access(keyPath: \.keepScreenOn); return boolValue(Keys.keepScreenOn, default: false) }
-        set { withMutation(keyPath: \.keepScreenOn) { defaults.set(newValue, forKey: Keys.keepScreenOn) } }
     }
 
     // MARK: Units. Defaults follow Environment Canada: metric, pressure in kPa.
@@ -408,7 +401,7 @@ final class AppSettings {
     func resetAll() {
         let keys = [
             Keys.appearance, Keys.buttonSize, Keys.textSize, Keys.highContrast, Keys.hapticsEnabled,
-            Keys.leftHanded, Keys.keepScreenOn, Keys.lengthUnit, Keys.weightUnit, Keys.temperatureUnit,
+            Keys.leftHanded, Keys.lengthUnit, Keys.weightUnit, Keys.temperatureUnit,
             Keys.pressureUnit, Keys.speedUnit, Keys.depthUnit, Keys.sizeEntryMode, Keys.autoFetchWeather,
             Keys.tagCatchLocation, Keys.useBarometer, Keys.photoIDEnabled, Keys.claudeModel
         ]
@@ -420,7 +413,6 @@ final class AppSettings {
         highContrast = highContrast
         hapticsEnabled = hapticsEnabled
         leftHanded = leftHanded
-        keepScreenOn = keepScreenOn
         lengthUnit = lengthUnit
         weightUnit = weightUnit
         temperatureUnit = temperatureUnit
