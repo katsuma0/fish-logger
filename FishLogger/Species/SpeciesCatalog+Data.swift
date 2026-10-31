@@ -28,7 +28,7 @@ extension SpeciesCatalog {
             weightB: 3.180,
             colorHex: 0x9A7F2E,
             habitat: "Large lakes and rivers, around rocky points, reefs, weed edges, and drop-offs.",
-            range: "From Quebec west to northeastern BC and north into the Northwest Territories; scarce in the Maritimes."
+            range: "From Quebec west to northeastern BC and north into the Northwest Territories; rare or absent in the Maritimes."
         ),
         Species(
             id: "sauger",
@@ -105,7 +105,7 @@ extension SpeciesCatalog {
             otherNames: ["Muskie", "Musky", "Lunge", "Maskinongé"],
             scientificName: "Esox masquinongy",
             group: .pike,
-            summary: "The biggest predator in most Ontario lakes, slow to catch and nearly always released. Heavy gear and a big net keep fish in good shape.",
+            summary: "The biggest predator in the Ontario lakes it lives in, slow to catch and nearly always released. Heavy gear and a big net keep fish in good shape.",
             idTips: [
                 "Dark bars or spots on a light olive to tan body; a pike is the reverse.",
                 "Six or more pores under each side of the lower jaw.",
@@ -163,7 +163,7 @@ extension SpeciesCatalog {
             weightB: nil,
             colorHex: 0x4C7A5E,
             habitat: "Clear, weedy ponds, lakes, and slow streams with lots of cover.",
-            range: "Southern Quebec and New Brunswick, and introduced in Nova Scotia. Rare or absent in Ontario."
+            range: "Southern New Brunswick and southern Quebec, and introduced in Nova Scotia, where it is still spreading. Rare or absent in Ontario."
         ),
 
         // MARK: Bass and sunfish
@@ -276,7 +276,7 @@ extension SpeciesCatalog {
             weightB: 3.332,
             colorHex: 0x6E7A86,
             habitat: "Turbid lakes, bays, and slow rivers, around brush and drop-offs.",
-            range: "Southwestern Ontario, mainly around Lake Erie and Lake St. Clair."
+            range: "Only a few waters in southwestern Ontario, mostly bays and rivers around Lake Erie and Lake St. Clair."
         ),
         Species(
             id: "bluegill",
@@ -342,7 +342,7 @@ extension SpeciesCatalog {
             weightB: 3.081,
             colorHex: 0x5F7690,
             habitat: "Open water of large lakes and big rivers; spawns over gravel in tributaries.",
-            range: "Lake Erie, Lake St. Clair, and western Lake Ontario, plus the Red River and Lake Winnipeg in Manitoba."
+            range: "Lake Erie and Lake St. Clair, parts of Lake Ontario and southern Lake Huron, plus the Red River and Lake Winnipeg in Manitoba."
         ),
         Species(
             id: "white_perch",
@@ -358,7 +358,7 @@ extension SpeciesCatalog {
                 "Rarely over 30 cm."
             ],
             lookalikes: ["white_bass", "striped_bass"],
-            traits: [.deepFlatBody, .spinyDorsal, .twoSeparateDorsals, .silverColor, .forkedTail],
+            traits: [.deepFlatBody, .spinyDorsal, .silverColor, .forkedTail],
             sizeCutoffsCm: [15, 20, 25, 30],
             weightA: nil,
             weightB: nil,
@@ -445,7 +445,7 @@ extension SpeciesCatalog {
             idTips: [
                 "Black and red spots, often with pale halos, on a golden brown body.",
                 "Few or no spots on the tail; a rainbow's tail is heavily spotted.",
-                "No white edges on the lower fins, unlike brook trout and splake.",
+                "No bold white front edges on the lower fins, unlike brook trout and splake.",
                 "Square tail and a jaw that reaches past the eye in big fish."
             ],
             lookalikes: ["brook_trout", "atlantic_salmon", "rainbow_trout"],
@@ -499,7 +499,7 @@ extension SpeciesCatalog {
             weightB: nil,
             colorHex: 0x6E6248,
             habitat: "Stocked lakes, often small and cold; cruises shorelines in spring and under the ice.",
-            range: "Stocked lakes in Ontario, the Prairies, Quebec, and the Maritimes; rarely reproduces."
+            range: "Stocked lakes, mostly in Ontario, Quebec, and the Prairie provinces; rarely reproduces in the wild."
         ),
         Species(
             id: "cutthroat_trout",
@@ -532,9 +532,9 @@ extension SpeciesCatalog {
             summary: "Big-headed native char of western mountain rivers. Protected in many waters, so check the rules before keeping one.",
             idTips: [
                 "Pale yellow, orange, or pink spots on an olive to grey back, and no black spots.",
-                "Large, broad, flat head with the jaw reaching past the eye; a Dolly Varden's head is smaller.",
-                "Lower fins with white front edges.",
-                "No worm-like marks on the back, unlike a brook trout."
+                "Large, broad, flat head with the jaw reaching past the eye; a Dolly Varden's head is smaller and rounder.",
+                "Where you are helps: a char from an interior BC or Alberta river is most likely a bull trout, one near the coast a Dolly Varden.",
+                "Lower fins with white front edges, and no worm-like marks on the back like a brook trout."
             ],
             lookalikes: ["dolly_varden", "brook_trout", "lake_trout"],
             traits: [.adiposeFin, .torpedoBody, .largeMouth, .lightSpotsDarkBody, .whiteFinEdges, .forkedTail],
@@ -553,10 +553,10 @@ extension SpeciesCatalog {
             group: .troutChar,
             summary: "Coastal and northern char. Sea-run fish enter rivers bright silver and colour up as they spawn.",
             idTips: [
-                "Smaller, rounder head than a bull trout.",
-                "Pink to red spots, about the size of the pupil, on olive or silver sides.",
-                "Lower fins with white edges and no black spots on the body.",
-                "Sea-run fish are bright silver with faint spots."
+                "Smaller, rounder head than a bull trout, with a shorter snout.",
+                "Small pink to red spots on olive or silver sides, and no black spots.",
+                "Where you are helps: on the coast and in the far north a char is most likely a Dolly Varden, inland a bull trout.",
+                "Lower fins with white front edges; sea-run fish are bright silver with faint spots."
             ],
             lookalikes: ["bull_trout", "arctic_char"],
             traits: [.adiposeFin, .torpedoBody, .lightSpotsDarkBody, .whiteFinEdges, .silverColor, .forkedTail],
@@ -587,7 +587,7 @@ extension SpeciesCatalog {
             weightB: nil,
             colorHex: 0xA8503C,
             habitat: "Cold Arctic lakes, rivers, and coastal waters; landlocked fish live in some deep lakes farther south.",
-            range: "Nunavut, the Northwest Territories, the northern Yukon, northern Quebec, Labrador, and Newfoundland, with landlocked lakes in southern Quebec."
+            range: "Nunavut and the Arctic islands, the Arctic coast of the Northwest Territories, the Hudson Bay coast, northern Quebec, Labrador, and Newfoundland, with landlocked fish in a few southern Quebec lakes."
         ),
 
         // MARK: Salmon
@@ -730,7 +730,7 @@ extension SpeciesCatalog {
         Species(
             id: "lake_whitefish",
             commonName: "Lake whitefish",
-            otherNames: ["Whitefish", "Humpback whitefish", "Grand corégone"],
+            otherNames: ["Whitefish", "Common whitefish", "Grand corégone"],
             scientificName: "Coregonus clupeaformis",
             group: .whitefish,
             summary: "Bottom-feeding relative of trout. Good eating, and an ice fishing target on many Ontario and Prairie lakes.",
@@ -797,7 +797,7 @@ extension SpeciesCatalog {
             id: "inconnu",
             commonName: "Inconnu",
             otherNames: ["Sheefish", "Coney", "Connie"],
-            scientificName: "Stenodus leucichthys",
+            scientificName: "Stenodus nelma",
             group: .whitefish,
             summary: "Big, predatory whitefish of the far northwest. Strong fighter and good eating.",
             idTips: [
@@ -806,7 +806,7 @@ extension SpeciesCatalog {
                 "Adipose fin present and no spots.",
                 "Much bigger than other whitefish, often over 60 cm."
             ],
-            lookalikes: ["lake_whitefish"],
+            lookalikes: ["lake_whitefish", "cisco"],
             traits: [.adiposeFin, .torpedoBody, .largeMouth, .silverColor, .forkedTail],
             sizeCutoffsCm: [45, 60, 75, 90],
             weightA: nil,
@@ -895,13 +895,13 @@ extension SpeciesCatalog {
             group: .other,
             summary: "Large, strong, wary bottom feeder from Europe and Asia. Now common in warm water across southern Canada.",
             idTips: [
-                "Two pairs of barbels at the corners of the mouth.",
+                "Two pairs of barbels on the upper jaw, the longer pair at the corners of the mouth.",
                 "Large bronze to golden scales outlined in dark.",
                 "Long dorsal fin with a stout, saw-toothed front spine.",
                 "Small, rubbery mouth that points down when feeding."
             ],
             lookalikes: ["white_sucker", "freshwater_drum"],
-            traits: [.barbels, .smallMouth, .goldenColor, .forkedTail],
+            traits: [.longDorsalFin, .barbels, .smallMouth, .goldenColor, .forkedTail],
             sizeCutoffsCm: [40, 55, 70, 85],
             weightA: -4.639,
             weightB: 2.920,
@@ -923,7 +923,7 @@ extension SpeciesCatalog {
                 "Silver to grey with no stripes."
             ],
             lookalikes: ["white_bass", "common_carp"],
-            traits: [.deepFlatBody, .spinyDorsal, .silverColor, .roundedTail],
+            traits: [.deepFlatBody, .spinyDorsal, .longDorsalFin, .silverColor, .roundedTail],
             sizeCutoffsCm: [30, 40, 50, 62],
             weightA: nil,
             weightB: nil,
@@ -934,7 +934,7 @@ extension SpeciesCatalog {
         Species(
             id: "bowfin",
             commonName: "Bowfin",
-            otherNames: ["Dogfish", "Mudfish", "Poisson-castor"],
+            otherNames: ["Eyetail bowfin", "Dogfish", "Mudfish", "Poisson-castor"],
             scientificName: "Amia ocellicauda",
             group: .other,
             summary: "Ancient, air-breathing fish of warm, weedy water. Fights hard and is tough to unhook.",
@@ -1005,7 +1005,7 @@ extension SpeciesCatalog {
             group: .other,
             summary: "The largest freshwater fish in North America; fish over 3 m still turn up in the Fraser River. Catch and release only in BC.",
             idTips: [
-                "The only sturgeon in the Fraser and Columbia river systems.",
+                "In BC rivers, a sturgeon you catch is almost always a white sturgeon.",
                 "Grey to brown back and pale belly, with no yellow tint.",
                 "Rows of bony plates along the back and sides, smoothing with age.",
                 "Four barbels under a broad, rounded snout."
@@ -1029,7 +1029,7 @@ extension SpeciesCatalog {
             idTips: [
                 "Gold iris in a large eye.",
                 "Dorsal fin starts behind the front of the anal fin; a mooneye's starts ahead of it.",
-                "Fleshy keel along the belly from the throat to the anal fin.",
+                "Fleshy keel along the belly from the pectoral fins to the anal fin.",
                 "Thin, flat, silver body with large scales."
             ],
             lookalikes: ["mooneye"],
@@ -1061,7 +1061,7 @@ extension SpeciesCatalog {
             weightB: nil,
             colorHex: 0x6F7F8E,
             habitat: "Clear, large rivers and lakes, often in current.",
-            range: "The St. Lawrence and Ottawa rivers and the Great Lakes, west through Manitoba and Saskatchewan to Alberta."
+            range: "The St. Lawrence and Ottawa rivers and the lower Great Lakes, west through northwestern Ontario into Manitoba and Saskatchewan."
         ),
         Species(
             id: "white_sucker",
@@ -1083,7 +1083,7 @@ extension SpeciesCatalog {
             weightB: nil,
             colorHex: 0x76705A,
             habitat: "Lakes and streams of every size, feeding on the bottom.",
-            range: "Nearly all of Canada south of the tree line, except the island of Newfoundland."
+            range: "Almost all of Canada, north to the Mackenzie Delta; absent from the island of Newfoundland and most of coastal BC."
         ),
         Species(
             id: "round_goby",
